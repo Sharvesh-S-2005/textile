@@ -55,6 +55,21 @@ simulation:
       clean_after_h: 8             # time for maintenance to clean once flagged
       initial_days_since_clean_max: 15
 
+  # Parameters for simulator/machine_model.py.
+  machine_dynamics:
+    changeover_min: 10             # machines idle at each shift start during crew handover
+    stagger_max_s: 90              # per-machine lag on every start/stop
+    current_noise_fraction: 0.03
+    inrush: {multiplier: {min: 2.5, max: 4.0}, duration_s: 10}   # first reading after start
+    standby_current_a: {mean: 0.08, sd: 0.03}
+    running_threshold_fraction: 0.2   # running = current_a > this * rated_current_a
+    vib_noise_fraction: 0.06
+    vib_crest_factor: {min: 2.2, max: 3.0}   # vib_peak_g / vib_rms_g
+    idle_vib_rms_g: {mean: 0.01, sd: 0.004}
+    degradation:
+      ratio_at_30_days: 2.5        # vib_rms multiplier after 30 simulated days
+      initial_days: 0              # wear already accumulated at simulation start
+
 # Profile values describe the zone with all its machines running.
 # mean +/- 2*sd spans the range in the CLAUDE.md zone table (~95% of samples).
 # PM10 is set to ~2x PM2.5 because cotton dust is dominated by coarse particles.
