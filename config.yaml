@@ -12,7 +12,7 @@ mqtt:
   client_id_prefix: ohs-backend
 
 simulation:
-  schema_version: "1.0"
+  schema_version: "1.1"
   env_interval_s: 10
   ble_interval_s: 30
   machine_interval_s: 10
@@ -71,6 +71,11 @@ simulation:
     degradation:
       ratio_at_30_days: 2.5        # vib_rms multiplier after 30 simulated days
       initial_days: 0              # wear already accumulated at simulation start
+    # Same fault behaviour as the zone nodes, on the current and vibration channels.
+    sensor_faults:
+      rate_per_sensor_per_h: 0.02
+      duration_min: {min: 2, max: 10}
+      kinds: [stale, error]
 
   # Parameters for simulator/worker_model.py.
   worker_dynamics:
@@ -92,6 +97,10 @@ simulation:
       unknown_probability: 0.02
       record_delay_min: {min: 5, max: 30}   # supervisor round after shift start
     supervisors: {A: SUP-01, B: SUP-02, C: SUP-03}
+    # Pairs who arrive together and tap the gate within the same second, every
+    # shift. This exercises event_id deduplication (same device, same ts, two
+    # distinct events). The first worker of each pair must come first in `workers`.
+    same_second_tap_pairs: [[W101, W102], [W109, W110], [W116, W117]]
 
   # BLE sightings produced by the publisher from the workers' true zones.
   # Tags are also heard by adjacent zone nodes (leakage); the backend must resolve it.
@@ -271,12 +280,19 @@ exposure_limits:
       criterion_db: 85
       exchange_rate_db: 3
       duration_h: 8
+      threshold_db: 80             # levels below this contribute zero to the NIOSH dose
+      source: "NIOSH 98-126, Criteria for a Recommended Standard: Occupational Noise Exposure"
     india:
+      # Permitted exposure halves per 5 dB: 8 h at 90, 4 h at 95, 2 h at 100,
+      # 1 h at 105, 30 min at 110, 15 min at 115 dBA.
+      # NOTE: rules under the OSH Code 2020 may supersede this schedule; re-check
+      # before final submission.
       criterion_db: 90
-      # VERIFY: exchange rate must be checked against the current Tamil Nadu
-      # Factories Rules before final submission.
       exchange_rate_db: 5
       duration_h: 8
+      threshold_db: 90             # levels below 90 dBA contribute zero to the India dose
+      absolute_max_db: 115         # no exposure above this is permitted: hard alarm, not dose
+      source: "Schedule XXVIII, Rule 95, Tamil Nadu Factories Rules"
   # ISO 7243:2017 WBGT reference value, metabolic rate class 2 (moderate work),
   # acclimatised worker. The assumption is stated wherever the value is shown.
   wbgt_limit_c: 28.0

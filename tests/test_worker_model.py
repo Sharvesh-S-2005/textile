@@ -132,3 +132,15 @@ def test_seeded_run_is_reproducible(schedule: ShiftSchedule) -> None:
     assert a.timelines == b.timelines
     assert a.rfid_events == b.rfid_events and a.ppe_events == b.ppe_events
     assert a.timelines != c.timelines
+
+
+def test_same_second_tap_pairs_check_in_within_one_second(model: WorkerModel) -> None:
+    check_ins = {}
+    for e in model.rfid_events:
+        if e.event == "check_in":
+            check_ins.setdefault(e.worker_id, []).append(e.ts)
+    for first, second in DYN["same_second_tap_pairs"]:
+        assert check_ins[first] and len(check_ins[first]) == len(check_ins[second])
+        for a, b in zip(check_ins[first], check_ins[second]):
+            assert a.replace(microsecond=0) == b.replace(microsecond=0)
+            assert a != b

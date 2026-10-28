@@ -1,5 +1,6 @@
 """Tests for simulator/schedule.py and simulator/machine_model.py."""
 
+import copy
 from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
@@ -22,8 +23,13 @@ def schedule() -> ShiftSchedule:
 
 
 def _machine(machine_id: str, schedule: ShiftSchedule, seed: int = 42,
-             start: datetime = SHIFT_A_START) -> MachineModel:
-    return MachineModel.from_config(machine_id, schedule, np.random.default_rng(seed), start)
+             start: datetime = SHIFT_A_START, fault_rate_per_h: float = 0.0) -> MachineModel:
+    """Machine with sensor faults off by default, so measurement tests see every value."""
+    cfg = next(m for m in config.get_machines() if m["machine_id"] == machine_id)
+    dynamics = copy.deepcopy(DYN)
+    dynamics["sensor_faults"]["rate_per_sensor_per_h"] = fault_rate_per_h
+    return MachineModel(cfg, dynamics, config.get_validation_config()["fields"], schedule,
+                        np.random.default_rng(seed), start)
 
 
 def _run(m: MachineModel, start: datetime, n: int) -> list[tuple[datetime, dict]]:
@@ -138,3 +144,47 @@ def test_same_seed_reproduces_machine_sequence(schedule: ShiftSchedule) -> None:
     a = [r for _, r in _run(_machine("M4", schedule, seed=3), SHIFT_A_START, 200)]
     b = [r for _, r in _run(_machine("M4", schedule, seed=3), SHIFT_A_START, 200)]
     assert a == b
+
+
+# ---------------------------------------------------------------- sensor faults (v1.1d)
+
+def test_machine_sensor_faults_emit_null_with_flag(schedule: ShiftSchedule) -> None:
+    m = _machine("M3", schedule, fault_rate_per_h=30.0)
+    rows = [r for _, r in _run(m, SHIFT_A_START + timedelta(hours=1), 600)]
+    seen = {(ch, r["sensor_flags"][ch]) for r in rows for ch in ("current", "vibration")}
+    assert {("current", "stale"), ("current", "error"),
+            ("vibration", "stale"), ("vibration", "error")} <= seen
+    for r in rows:
+        if r["sensor_flags"]["current"] == "ok":
+            assert r["current_a"] is not None
+        else:
+            assert r["current_a"] is None
+            assert isinstance(r["running"], bool)      # last decision is carried
+        vib_ok = r["sensor_flags"]["vibration"] == "ok"
+        assert (r["vib_rms_g"] is not None) == vib_ok
+        assert (r["vib_peak_g"] is not None) == vib_ok
+
+
+def test_current_fault_carries_last_running_decision(schedule: ShiftSchedule) -> None:
+    m = _machine("M3", schedule, fault_rate_per_h=30.0)
+    rows = [r for _, r in _run(m, SHIFT_A_START + timedelta(hours=1), 600)]
+    for prev, cur in zip(rows, rows[1:]):
+        if cur["current_a"] is None:
+            assert cur["running"] == prev["running"]
+
+
+def test_faults_do_not_change_physical_running_state(schedule: ShiftSchedule) -> None:
+    clean = _machine("M3", schedule, seed=4)
+    faulty = _machine("M3", schedule, seed=4, fault_rate_per_h=30.0)
+    for i in range(300):
+        ts = SHIFT_A_START + timedelta(hours=1) + i * DT
+        clean.reading(ts)
+        faulty.reading(ts)
+        assert clean.running_now == faulty.running_now
+
+
+def test_default_config_produces_occasional_faults(schedule: ShiftSchedule) -> None:
+    m = MachineModel.from_config("M1", schedule, np.random.default_rng(0), SHIFT_A_START)
+    rows = [r for _, r in _run(m, SHIFT_A_START, 6 * 60 * 24 * 7)]   # 7 days, ~7 faults expected
+    faulted = sum(1 for r in rows if set(r["sensor_flags"].values()) != {"ok"})
+    assert 0 < faulted < 0.1 * len(rows)

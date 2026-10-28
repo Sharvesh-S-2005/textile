@@ -128,8 +128,8 @@ by the Z1 node. That is the leakage the backend must resolve.
   will message is registered at connect time and cannot know when the device
   died, so the LWT is `{schema_version, device_id, online:false}`. Every message
   the simulator itself sends (including the clean-shutdown status) has `ts`.
-  `ingest/validation.py` must accept the LWT form. **Contract wording should be
-  clarified.**
+  `ingest/validation.py` must accept the LWT form. *Resolved in contract v1.1a:
+  `ts` is optional and expected absent on `online: false` status.*
 - **Client IDs equal device IDs**, per the contract (one MQTT client per device,
   17 in total). `mqtt.client_id_prefix` is kept for backend clients.
 - **Default `--start` is 06:00 IST** as the brief specifies. Shift-A workers
@@ -137,13 +137,22 @@ by the Z1 node. That is the leakage the backend must resolve.
   check-ins (they happened before the window). Use `--start 2026-10-28T05:30:00`
   to include them. Consider changing the default.
 - **Event timestamps are serialised per device:** gate and supervisor-app events
-  are at least 1 s apart, so the dedup key stays unique.
+  are at least 1 s apart, so the dedup key stays unique. *Superseded by v1.1b:
+  events carry a UUID v4 `event_id` and deduplicate on it; the spacing was
+  removed, and same-second gate pairs now occur in every run.*
 - `validation.fields.seen_count.max: 1000` and the spike thresholds are
-  plausibility values chosen here; the contract gives none.
-- The India noise exchange rate (5 dB) **must be verified** against the current
-  Tamil Nadu Factories Rules before final submission.
+  plausibility values chosen here; the contract gives none. *Resolved in v1.1c:
+  documented, with reasons, in contract section 10.*
+- **India noise criterion — resolved (v1.1e).** The 5 dB exchange rate is
+  confirmed: Schedule XXVIII under Rule 95 of the Tamil Nadu Factories Rules
+  (8 h at 90 dBA, 4 h at 95, 2 h at 100, 1 h at 105, 30 min at 110, 15 min at 115).
+  Levels below 90 dBA contribute nothing to the India dose (`threshold_db: 90`,
+  compared with 80 dBA for NIOSH), and 115 dBA is an absolute maximum, a hard
+  alarm rather than a dose contribution. Rules under the OSH Code 2020 may
+  supersede this schedule and should be re-checked before final submission.
 - Machine `sensor_flags` are always `ok`; machine-node fault simulation is not
-  implemented.
+  implemented. *Resolved in v1.1d: `stale`/`error` episodes on the current and
+  vibration channels (`simulator/faults.py`).*
 
 ### Pending for Day 2
 

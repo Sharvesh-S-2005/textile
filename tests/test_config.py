@@ -10,7 +10,7 @@ import config
 
 def test_config_loads() -> None:
     cfg = config.get_config()
-    assert cfg["simulation"]["schema_version"] == "1.0"
+    assert cfg["simulation"]["schema_version"] == "1.1"
 
 
 def test_entity_counts() -> None:
@@ -94,3 +94,20 @@ def test_high_exposure_workers_exist() -> None:
     dyn = config.get_simulation_config()["worker_dynamics"]
     assert set(dyn["high_exposure_workers"]) <= ids
     assert dyn["break_zone"] in {z["zone_id"] for z in config.get_zones()}
+
+
+def test_noise_criteria_constants() -> None:
+    criteria = config.get_exposure_limits()["criteria"]
+    india, niosh = criteria["india"], criteria["niosh"]
+    assert (india["criterion_db"], india["exchange_rate_db"], india["duration_h"]) == (90, 5, 8)
+    assert india["threshold_db"] == 90 and india["absolute_max_db"] == 115
+    assert "Rule 95" in india["source"]
+    assert (niosh["criterion_db"], niosh["exchange_rate_db"], niosh["threshold_db"]) == (85, 3, 80)
+
+
+def test_same_second_tap_pairs_share_a_shift() -> None:
+    shift = {w["worker_id"]: w["shift"] for w in config.get_workers()}
+    order = [w["worker_id"] for w in config.get_workers()]
+    for first, second in config.get_simulation_config()["worker_dynamics"]["same_second_tap_pairs"]:
+        assert shift[first] == shift[second]
+        assert order.index(first) < order.index(second)

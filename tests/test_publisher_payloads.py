@@ -9,6 +9,7 @@ import io
 import json
 import re
 import time
+import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -37,6 +38,8 @@ ENV_FIELDS = {"noise_dba": float, "noise_peak_dba": float, "pm25_ugm3": float, "
 ENV_SENSORS = {"noise": ["noise_dba", "noise_peak_dba"], "pm": ["pm25_ugm3", "pm10_ugm3"],
                "temp_rh": ["temp_c", "rh_pct"], "globe": ["globe_temp_c"], "co2": ["co2_ppm"]}
 MACHINE_FIELDS = {"current_a": float, "vib_rms_g": float, "vib_peak_g": float}
+MACHINE_CHANNELS = {"current": ["current_a"], "vibration": ["vib_rms_g", "vib_peak_g"]}
+EVENT_KINDS = ("rfid", "ppe")
 
 
 def _run(argv: list[str]) -> list[tuple[str, dict]]:
@@ -93,7 +96,7 @@ def test_all_six_topic_types_are_published(messages: list[tuple[str, dict]]) -> 
 def test_common_fields_and_ts(messages: list[tuple[str, dict]]) -> None:
     end = START_UTC + timedelta(hours=1.5)
     for topic, p in messages:
-        assert p["schema_version"] == "1.0", topic
+        assert p["schema_version"] == "1.1", topic
         assert isinstance(p["device_id"], str) and p["device_id"], topic
         ts = _parse_ts(p["ts"])
         assert START_UTC <= ts <= end, (topic, p["ts"])   # simulated time, not wall clock
@@ -162,10 +165,15 @@ def test_machine_payloads(messages: list[tuple[str, dict]]) -> None:
         assert topic == f"textile/machine/{p['machine_id']}/status"
         assert p["zone_id"] == machine_zone[p["machine_id"]]
         assert isinstance(p["running"], bool)
-        for field, typ in MACHINE_FIELDS.items():
-            _in_range(field, p[field], typ)
-        assert set(p["sensor_flags"]) == {"current", "vibration"}
+        assert set(p["sensor_flags"]) == set(MACHINE_CHANNELS)
         assert set(p["sensor_flags"].values()) <= FLAGS
+        for channel, fields in MACHINE_CHANNELS.items():
+            for field in fields:
+                assert field in p, (topic, field)          # present even when null
+                if p[field] is None:
+                    assert p["sensor_flags"][channel] != "ok", (topic, field)
+                else:
+                    _in_range(field, p[field], MACHINE_FIELDS[field])
 
 
 def test_rfid_payloads(messages: list[tuple[str, dict]]) -> None:
@@ -211,9 +219,19 @@ def test_status_payloads(messages: list[tuple[str, dict]]) -> None:
     assert not any(p["online"] for p in last.values())    # clean shutdown
 
 
-def test_dedup_key_is_unique(messages: list[tuple[str, dict]]) -> None:
-    keys = [(p["device_id"], p["ts"], t) for t, p in messages]
-    assert len(keys) == len(set(keys))
+def test_dedup_keys_are_unique(messages: list[tuple[str, dict]]) -> None:
+    # Contract v1.1 section 11: telemetry on (device_id, ts, topic), events on event_id.
+    telemetry = [(p["device_id"], p["ts"], t) for t, p in messages if _kind(t) not in EVENT_KINDS]
+    assert len(telemetry) == len(set(telemetry))
+    event_ids = [p["event_id"] for t, p in messages if _kind(t) in EVENT_KINDS]
+    assert event_ids and len(event_ids) == len(set(event_ids))
+
+
+def test_event_ids_are_uuid4(messages: list[tuple[str, dict]]) -> None:
+    for t, p in messages:
+        if _kind(t) in EVENT_KINDS:
+            parsed = uuid.UUID(p["event_id"])
+            assert parsed.version == 4 and str(parsed) == p["event_id"]
 
 
 def test_outage_buffers_then_replays_with_original_ts(messages: list[tuple[str, dict]]) -> None:
@@ -255,13 +273,17 @@ def test_speed_paces_wall_clock() -> None:
     assert 0.5 < time.monotonic() - t0 < 3.0
 
 
-def test_events_on_one_device_never_share_a_second() -> None:
-    # A long run with all three shift changes, to give same-second collisions a chance.
-    msgs = _run(["--dry-run", "--speed", "1e9", "--duration-h", "17", "--start", START_LOCAL,
-                 "--seed", "11", "--no-outage"])
-    for kind in ("rfid", "ppe"):
-        ts = [p["ts"] for t, p in msgs if _kind(t) == kind]
-        assert len(ts) >= 20 and len(ts) == len(set(ts)), kind
+def test_normal_run_has_same_second_gate_pair(messages: list[tuple[str, dict]]) -> None:
+    # v1.1b: real gates see two taps in one second; the run must exercise that case.
+    rfid = [p for t, p in messages if _kind(t) == "rfid"]
+    by_second: dict[str, list[dict]] = defaultdict(list)
+    for p in rfid:
+        by_second[p["ts"]].append(p)
+    pairs = [ps for ps in by_second.values() if len(ps) > 1]
+    assert pairs
+    for ps in pairs:
+        assert len({p["event_id"] for p in ps}) == len(ps)
+        assert len({p["card_id"] for p in ps}) == len(ps)
 
 
 class _InterruptingSink:

@@ -103,6 +103,8 @@ class WorkerModel:
         self.timelines: dict[str, list[Segment]] = {}
         self.rfid_events: list[RfidEvent] = []
         self.ppe_events: list[PpeEvent] = []
+        self._tap_partner = {second: first for first, second in dynamics["same_second_tap_pairs"]}
+        self._check_ins: dict[tuple[str, datetime], datetime] = {}
 
         # Widen the query so a shift ending at `start` (its check-out) and one starting
         # just after `end` (its check-in) are both included.
@@ -174,6 +176,15 @@ class WorkerModel:
         high = self._is_high_exposure(wid)
 
         check_in = shift.start - _minutes(rng, self._d["check_in_before_min"])
+        partner = self._tap_partner.get(wid)
+        if partner is not None:
+            if (partner, shift.start) not in self._check_ins:
+                raise config.ConfigError(
+                    f"same_second_tap_pairs: {partner} must come before {wid} in workers")
+            # Arrives with the partner: same whole second, half a second later.
+            partner_in = self._check_ins[(partner, shift.start)]
+            check_in = partner_in.replace(microsecond=0) + timedelta(milliseconds=500)
+        self._check_ins[(wid, shift.start)] = check_in
         if high:
             overtime = _minutes(rng, self._d["high_exposure"]["overtime_min"])
         elif rng.random() < self._d["overtime"]["probability"]:

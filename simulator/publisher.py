@@ -19,6 +19,7 @@ import logging
 import math
 import sys
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -167,7 +168,7 @@ class Simulation:
         ]
         self.workers = WorkerModel.from_config(schedule, root.spawn(1)[0], start, self.end)
         self._ble_rng = root.spawn(1)[0]
-        self._last_event_ts: dict[str, datetime] = {}
+        self._event_rng = root.spawn(1)[0]
 
         self.zone_device = {z["zone_id"]: z["device_id"] for z in self.zones}
         self.device_ids = ([z["device_id"] for z in self.zones]
@@ -233,30 +234,20 @@ class Simulation:
             messages.append((f"{self._prefix}/zone/{zone_id}/ble", payload))
         return messages
 
-    def _event_ts(self, device_id: str, ts: datetime) -> datetime:
-        """Whole-second event time, at least 1 s after the device's previous event.
-
-        A gate reader or supervisor app handles one record at a time, and this keeps
-        the backend's (device_id, ts, topic) dedup key unique.
-        """
-        ts = ts.replace(microsecond=0)
-        last = self._last_event_ts.get(device_id)
-        if last is not None and ts <= last:
-            ts = last + timedelta(seconds=1)
-        self._last_event_ts[device_id] = ts
-        return ts
+    def _event_id(self) -> str:
+        """A UUID v4 for one event, drawn from the seeded stream so runs are reproducible."""
+        return str(uuid.UUID(bytes=self._event_rng.bytes(16), version=4))
 
     def rfid_message(self, event: Any) -> tuple[str, dict]:
         """Gate check-in / check-out (section 7)."""
-        ts = self._event_ts(self.gate["device_id"], event.ts)
-        payload = {**self._header(self.gate["device_id"], ts), "card_id": event.card_id,
-                   "event": event.event, "gate_id": self.gate["gate_id"]}
+        payload = {**self._header(self.gate["device_id"], event.ts), "event_id": self._event_id(),
+                   "card_id": event.card_id, "event": event.event, "gate_id": self.gate["gate_id"]}
         return f"{self._prefix}/gate/rfid", payload
 
     def ppe_message(self, event: Any) -> tuple[str, dict]:
         """Supervisor PPE entry (section 8)."""
-        ts = self._event_ts(self.ppe_device_id, event.ts)
-        payload = {**self._header(self.ppe_device_id, ts), "worker_id": event.worker_id,
+        payload = {**self._header(self.ppe_device_id, event.ts), "event_id": self._event_id(),
+                   "worker_id": event.worker_id,
                    "hearing_ppe": event.hearing_ppe, "respiratory_ppe": event.respiratory_ppe,
                    "recorded_by": event.recorded_by}
         return f"{self._prefix}/ppe/entry", payload
@@ -328,7 +319,7 @@ class Simulation:
                 if elapsed_s % sim["env_interval_s"] == 0:
                     for z in self.zones:
                         factors = [m.noise_energy_factor(ts) for m in self.machines
-                                   if m.zone_id == z["zone_id"] and readings[m.machine_id]["running"]]
+                                   if m.zone_id == z["zone_id"] and m.running_now]
                         send(z["device_id"], *self.env_message(z["zone_id"], ts, factors), "env")
                 if elapsed_s % sim["ble_interval_s"] == 0:
                     for topic, payload in self.ble_messages(ts):

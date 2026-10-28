@@ -47,7 +47,9 @@ _REQUIRED_LIST_ITEMS: dict[str, list[str]] = {
 _REQUIRED_PROFILE_FIELDS: list[str] = [
     "noise_dba", "pm25_ugm3", "pm10_ugm3", "temp_c", "rh_pct", "co2_ppm",
 ]
-_REQUIRED_CRITERION_KEYS: list[str] = ["criterion_db", "exchange_rate_db", "duration_h"]
+_REQUIRED_CRITERION_KEYS: list[str] = [
+    "criterion_db", "exchange_rate_db", "duration_h", "threshold_db", "source",
+]
 _REQUIRED_VALIDATION_FIELD_KEYS: list[str] = ["min", "max", "spike_threshold"]
 
 

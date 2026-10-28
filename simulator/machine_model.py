@@ -10,6 +10,10 @@ The degrading machine's vibration grows exponentially with simulated age:
 Its noise contribution to the zone scales with the same factor (sound energy taken
 as proportional to vibration RMS - a deliberately mild coupling; see
 `noise_energy_factor`).
+
+The current and vibration channels have occasional `stale`/`error` episodes
+(contract v1.1d). A faulted channel publishes `null`; with the current channel down,
+`running` repeats the node's last decision because the node cannot measure it.
 """
 
 from __future__ import annotations
@@ -20,7 +24,10 @@ from typing import Any
 import numpy as np
 
 import config
+from simulator.faults import SensorFaults
 from simulator.schedule import ShiftSchedule
+
+CHANNELS: tuple[str, ...] = ("current", "vibration")
 
 
 class MachineModel:
@@ -59,6 +66,11 @@ class MachineModel:
         self._lag = timedelta(seconds=float(rng.uniform(0.0, dynamics["stagger_max_s"])))
         self._on_since: datetime | None = None
         self._first_reading = True
+        # Own stream, so fault draws do not shift the measurement sequence.
+        self._faults = SensorFaults(CHANNELS, dynamics["sensor_faults"], rng.spawn(1)[0])
+        self._last_ts: datetime | None = None
+        self._last_reported_running = False
+        self.running_now = False  # physical state, for the zone noise coupling
 
     @classmethod
     def from_config(
@@ -118,10 +130,15 @@ class MachineModel:
         return min(max(value, rng["min"]), rng["max"])
 
     def reading(self, ts: datetime) -> dict[str, Any]:
-        """Return the measurement fields of a machine status payload at simulated `ts`."""
+        """Return the measurement fields of a machine status payload at simulated `ts`.
+
+        Also updates `running_now`, the machine's true physical state, which the
+        publisher uses for the zone noise coupling whatever the sensors report.
+        """
         current = self._current(ts, self.scheduled_on(ts))
         self._first_reading = False
         running = current > self._d["running_threshold_fraction"] * self._rated_a
+        self.running_now = bool(running)
         if running:
             expected = self._baseline_vib * self.degradation_factor(ts)
             rms = expected * (1.0 + self._d["vib_noise_fraction"] * self._rng.standard_normal())
@@ -131,11 +148,25 @@ class MachineModel:
         rms = max(rms, 0.0)
         crest = self._d["vib_crest_factor"]
         peak = rms * self._rng.uniform(crest["min"], crest["max"])
-        return {
+
+        dt_s = 0.0 if self._last_ts is None else (ts - self._last_ts).total_seconds()
+        self._last_ts = ts
+        self._faults.update(ts, dt_s)
+        flags = {c: self._faults.flag(c) for c in CHANNELS}
+
+        reading: dict[str, Any] = {
             "zone_id": self.zone_id,
             "current_a": round(self._clamp("current_a", current), 2),
             "running": bool(running),
             "vib_rms_g": round(self._clamp("vib_rms_g", rms), 3),
             "vib_peak_g": round(self._clamp("vib_peak_g", peak), 3),
-            "sensor_flags": {"current": "ok", "vibration": "ok"},
+            "sensor_flags": flags,
         }
+        if flags["current"] != "ok":
+            reading["current_a"] = None
+            reading["running"] = self._last_reported_running
+        if flags["vibration"] != "ok":
+            reading["vib_rms_g"] = None
+            reading["vib_peak_g"] = None
+        self._last_reported_running = reading["running"]
+        return reading
