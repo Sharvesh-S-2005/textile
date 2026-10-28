@@ -179,10 +179,16 @@ def test_invalid_input_raises(levels: list, durations: list) -> None:
 
 
 def test_noise_module_has_no_arithmetic_mean() -> None:
-    """dB must never be averaged arithmetically: no mean()/average()/'/ len(' in the module."""
+    """dB must never be averaged arithmetically. Checks real code tokens only (strings
+    and comments ignored): no mean/average/statistics names and no division by len()."""
+    import io
+    import tokenize
     from pathlib import Path
 
     source = (Path(__file__).resolve().parents[1] / "exposure" / "noise.py").read_text(encoding="utf-8")
-    code = "\n".join(line.split("#")[0] for line in source.splitlines() if not line.strip().startswith(("#", '"')))
-    for forbidden in ("mean(", "average(", "/ len(", "statistics."):
-        assert forbidden not in code, forbidden
+    tokens = [t for t in tokenize.generate_tokens(io.StringIO(source).readline)
+              if t.type not in (tokenize.STRING, tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE)]
+    names = {t.string for t in tokens if t.type == tokenize.NAME}
+    assert not names & {"mean", "fmean", "average", "statistics", "median"}, names & {"mean", "fmean", "average"}
+    for a, b in zip(tokens, tokens[1:]):
+        assert not (a.string == "/" and b.string == "len"), "division by len() found"
