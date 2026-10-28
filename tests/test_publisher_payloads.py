@@ -305,7 +305,7 @@ class _InterruptingSink:
 
 
 def test_ctrl_c_publishes_offline_for_every_device() -> None:
-    sim = publisher.Simulation(START_UTC, timedelta(hours=1), seed=1, outage=None)
+    sim = publisher.Simulation(START_UTC, timedelta(hours=1), seed=1, outages=[])
     sink = _InterruptingSink(interrupt_at=500)
     sim.run(sink, speed=1e9)
     tail = sink.messages[-len(sim.device_ids):]
@@ -313,3 +313,27 @@ def test_ctrl_c_publishes_offline_for_every_device() -> None:
     assert all(t.startswith("textile/status/") and p["online"] is False for t, p in tail)
     assert _parse_ts(tail[0][1]["ts"]) < START_UTC + timedelta(hours=1)   # stopped early
     assert sink.closed
+
+
+def test_long_machine_outage_replays_records_older_than_late_threshold() -> None:
+    """--extra-outage on a machine node: replayed records keep their original ts."""
+    msgs = _run(["--dry-run", "--speed", "1e9", "--duration-h", "3", "--start", START_LOCAL, "--no-outage",
+                 "--extra-outage", "MN-M8:10:150"])
+    m8 = [(i, t, p) for i, (t, p) in enumerate(msgs) if p["device_id"] == "MN-M8"]
+    backlog = [(i, p) for i, t, p in m8 if _kind(t) == "status" and p["buffered_records"] > 0]
+    assert len(backlog) == 1
+    idx, status = backlog[0]
+    assert status["buffered_records"] == 150 * 6          # 150 min of 10 s readings
+    replayed = [p for i, t, p in m8 if i > idx and _kind(t) == "machine"
+                and _parse_ts(p["ts"]) < _parse_ts(status["ts"])]
+    assert len(replayed) == 150 * 6
+    late_s = VALIDATION["late_upload_threshold_s"]
+    oldest = min(_parse_ts(p["ts"]) for p in replayed)
+    assert (_parse_ts(status["ts"]) - oldest).total_seconds() > late_s
+
+
+def test_bad_extra_outage_spec_is_an_error() -> None:
+    with pytest.raises(SystemExit):
+        publisher.parse_args(["--extra-outage", "MN-M99:10:5"])
+    with pytest.raises(SystemExit):
+        publisher.parse_args(["--extra-outage", "MN-M8:ten:5"])

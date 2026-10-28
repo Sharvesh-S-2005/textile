@@ -56,6 +56,11 @@ simulation:
       needs_clean_gain: 1.25
       clean_after_h: 8             # time for maintenance to clean once flagged
       initial_days_since_clean_max: 15
+    # Failures the sensor does not notice (flag stays "ok"); the backend's
+    # stuck-value and spike checks exist to catch them. ~5 of each per 8 h run.
+    silent_faults:
+      stuck: {rate_per_sensor_per_h: 0.02, duration_min: {min: 6, max: 12}}
+      glitch: {rate_per_sensor_per_h: 0.02, magnitude_x_spike_threshold: 1.5}
 
   # Parameters for simulator/machine_model.py.
   machine_dynamics:

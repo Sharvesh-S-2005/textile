@@ -130,21 +130,26 @@ class MqttSink:
 
 @dataclass(frozen=True)
 class Outage:
-    """One zone node offline during [start, end)."""
+    """One device offline (buffering to microSD) during [start, end)."""
 
-    zone_id: str
+    device_id: str
     start: datetime
     end: datetime
+
+    def covers(self, device_id: str, ts: datetime) -> bool:
+        """True if `device_id` is offline at `ts`."""
+        return device_id == self.device_id and self.start <= ts < self.end
 
 
 class Simulation:
     """Owns every model and turns each simulated tick into contract payloads."""
 
-    def __init__(self, start: datetime, duration: timedelta, seed: int, outage: Outage | None) -> None:
+    def __init__(self, start: datetime, duration: timedelta, seed: int,
+                 outages: list[Outage] | None = None) -> None:
         """Build all models from config.yaml for the window [start, start + duration)."""
         self.start = start
         self.end = start + duration
-        self.outage = outage
+        self.outages = list(outages or [])
         self.sim = config.get_simulation_config()
         mqtt_cfg = config.get_mqtt_config()
         self._prefix = mqtt_cfg["topic_prefix"]
@@ -276,21 +281,17 @@ class Simulation:
         tick_s = math.gcd(sim["env_interval_s"], sim["ble_interval_s"], sim["machine_interval_s"])
         n_ticks = int((self.end - self.start).total_seconds() // tick_s)
         counts: Counter[str] = Counter()
-        buffer: list[tuple[str, dict]] = []
+        buffers: dict[str, list[tuple[str, dict]]] = {o.device_id: [] for o in self.outages}
         rfid = [e for e in self.workers.rfid_events if self.start <= e.ts < self.end]
         ppe = [e for e in self.workers.ppe_events if self.start <= e.ts < self.end]
         wall_start = time.monotonic()
         next_summary = self.start + SUMMARY_EVERY
         ts = self.start
-        outage_zone = self.outage.zone_id if self.outage else None
-        outage_device = self.zone_device[outage_zone] if outage_zone else None
-        clear_backlog_status = False
+        clear_backlog_status: set[str] = set()
 
         def send(device_id: str, topic: str, payload: dict, kind: str, retain: bool = False) -> None:
-            in_outage = (self.outage is not None and device_id == outage_device
-                         and self.outage.start <= ts < self.outage.end)
-            if in_outage:
-                buffer.append((topic, payload))
+            if any(o.covers(device_id, ts) for o in self.outages):
+                buffers[device_id].append((topic, payload))
                 counts["buffered"] += 1
                 return
             sink.publish(device_id, topic, payload, retain)
@@ -309,15 +310,16 @@ class Simulation:
                 if delay > 0:
                     time.sleep(delay)
 
-                if clear_backlog_status:
+                for device_id in sorted(clear_backlog_status):
                     # Replay finished during the previous tick; a new ts keeps the
                     # (device_id, ts, topic) dedup key unique.
-                    send(outage_device, self.status_topic[outage_device],
-                         self.status_payload(outage_device, ts, True, 0), "status", retain=True)
-                    clear_backlog_status = False
-                if self.outage and buffer and ts >= self.outage.end:
-                    self._replay(sink, outage_device, ts, buffer, counts)
-                    clear_backlog_status = True
+                    send(device_id, self.status_topic[device_id],
+                         self.status_payload(device_id, ts, True, 0), "status", retain=True)
+                clear_backlog_status.clear()
+                for o in self.outages:
+                    if buffers[o.device_id] and ts >= o.end:
+                        self._replay(sink, o.device_id, ts, buffers[o.device_id], counts)
+                        clear_backlog_status.add(o.device_id)
 
                 while rfid and rfid[0].ts <= ts:
                     send(self.gate["device_id"], *self.rfid_message(rfid.pop(0)), "rfid")
@@ -348,12 +350,13 @@ class Simulation:
         except KeyboardInterrupt:
             log.warning("interrupted at simulated %s; shutting down", iso_z(ts))
         finally:
-            if buffer:
-                log.warning("%d records still buffered on %s at end of run", len(buffer), outage_device)
+            for device_id, buffer in buffers.items():
+                if buffer:
+                    log.warning("%d records still buffered on %s at end of run", len(buffer), device_id)
             for device_id in self.device_ids:
+                backlog = len(buffers.get(device_id, []))
                 sink.publish(device_id, self.status_topic[device_id],
-                             self.status_payload(device_id, ts, False, len(buffer) if device_id == outage_device else 0),
-                             retain=True)
+                             self.status_payload(device_id, ts, False, backlog), retain=True)
                 counts["status"] += 1
             self._log_summary(ts, counts, wall_start)
             sink.close()
@@ -417,6 +420,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="simulated minutes after start when the outage begins")
     p.add_argument("--outage-duration-min", type=float, default=float(outage["duration_min"]))
     p.add_argument("--no-outage", action="store_true", help="disable the outage demo")
+    p.add_argument("--extra-outage", action="append", default=[], metavar="DEVICE:START_MIN:DURATION_MIN",
+                   help="take any device offline as well, e.g. MN-M8:60:150 (repeatable)")
     p.add_argument("--ground-truth-out", type=Path, default=None,
                    help="write each worker's TRUE zone per BLE window to this JSONL file "
                         "(for scoring localisation; never published, never stored in the DB)")
@@ -427,6 +432,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.error("--duration-h must be positive")
     if args.outage_zone not in {z["zone_id"] for z in config.get_zones()}:
         p.error(f"--outage-zone {args.outage_zone} is not a configured zone")
+    devices = ({z["device_id"] for z in config.get_zones()} | {m["device_id"] for m in config.get_machines()}
+               | {d["device_id"] for d in config.get_devices().values()})
+    parsed = []
+    for spec in args.extra_outage:
+        parts = spec.split(":")
+        try:
+            device_id, start_min, duration_min = parts[0], float(parts[1]), float(parts[2])
+        except (IndexError, ValueError):
+            p.error(f"--extra-outage {spec!r}: expected DEVICE:START_MIN:DURATION_MIN")
+        if len(parts) != 3 or device_id not in devices or duration_min <= 0:
+            p.error(f"--extra-outage {spec!r}: unknown device or bad duration")
+        parsed.append((device_id, start_min, duration_min))
+    args.extra_outage = parsed
     return args
 
 
@@ -436,13 +454,18 @@ def main(argv: list[str] | None = None) -> int:
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = parse_args(argv)
     start = args.start or _default_start()
-    outage = None
+    specs = list(args.extra_outage)
     if config.get_simulation_config()["outage"]["enabled"] and not args.no_outage:
-        o_start = start + timedelta(minutes=args.outage_start_min)
-        outage = Outage(args.outage_zone, o_start, o_start + timedelta(minutes=args.outage_duration_min))
-        log.info("outage demo: %s offline %s -> %s", args.outage_zone, iso_z(outage.start), iso_z(outage.end))
+        zone_device = next(z["device_id"] for z in config.get_zones() if z["zone_id"] == args.outage_zone)
+        specs.insert(0, (zone_device, args.outage_start_min, args.outage_duration_min))
+    outages = []
+    for device_id, start_min, duration_min in specs:
+        o_start = start + timedelta(minutes=start_min)
+        outage = Outage(device_id, o_start, o_start + timedelta(minutes=duration_min))
+        outages.append(outage)
+        log.info("outage: %s offline %s -> %s", device_id, iso_z(outage.start), iso_z(outage.end))
 
-    simulation = Simulation(start, timedelta(hours=args.duration_h), args.seed, outage)
+    simulation = Simulation(start, timedelta(hours=args.duration_h), args.seed, outages)
     if args.dry_run:
         sink: Sink = DryRunSink()
     else:

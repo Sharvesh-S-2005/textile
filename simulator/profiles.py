@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 import config
+from simulator.faults import SilentFaults
 
 SENSORS: tuple[str, ...] = ("noise", "pm", "temp_rh", "globe", "co2")
 SENSOR_FIELDS: dict[str, tuple[str, ...]] = {
@@ -103,6 +104,8 @@ class ZoneProfile:
         days_since_clean = rng.uniform(0.0, drift["initial_days_since_clean_max"])
         self._last_clean_ts: datetime = start_ts - timedelta(days=days_since_clean)
         self._needs_clean_since: datetime | None = None
+        # Own stream, so silent-fault draws do not shift the measurement sequence.
+        self._silent = SilentFaults(SENSOR_FIELDS, dynamics["silent_faults"], valid_ranges, rng.spawn(1)[0])
 
     @classmethod
     def from_config(
@@ -312,6 +315,7 @@ class ZoneProfile:
             "globe_temp_c": round(self._clamp("globe_temp_c", globe), 1),
             "co2_ppm": int(round(self._clamp("co2_ppm", co2))),
         }
+        values = self._silent.apply(ts, dt_s, values)
 
         self._update_faults(ts, dt_s)
         flags: dict[str, str] = {}

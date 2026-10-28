@@ -129,3 +129,39 @@ def test_pm_sensor_drifts_then_needs_clean_then_resets() -> None:
     assert "ok" in flags[first:]                 # cleaned afterwards
     # Flagged from t0 until cleaned at exactly t0 + 8 h: 8 h / 10 min = 48 readings.
     assert flags[first:].count("needs_clean") == 8 * 6
+
+
+def _no_flag_faults() -> dict:
+    return {"rate_per_sensor_per_h": 0.0, "duration_min": {"min": 2, "max": 5}, "kinds": ["stale"]}
+
+
+def test_stuck_sensor_repeats_values_with_ok_flag() -> None:
+    silent = {"stuck": {"rate_per_sensor_per_h": 20.0, "duration_min": {"min": 6, "max": 8}},
+              "glitch": {"rate_per_sensor_per_h": 0.0, "magnitude_x_spike_threshold": 1.5}}
+    rows = _series(_profile("Z4", silent_faults=silent, sensor_faults=_no_flag_faults()), 600, [1.0, 1.0])
+    n = config.get_validation_config()["stuck_value_count"]
+    co2 = [r["co2_ppm"] for r in rows]
+    longest = run = 1
+    for a, b in zip(co2, co2[1:]):
+        run = run + 1 if a == b else 1
+        longest = max(longest, run)
+    assert longest >= n + 1                       # enough for the stuck-value check to fire
+    assert all(r["sensor_flags"]["co2"] == "ok" for r in rows)
+
+
+def test_glitch_jumps_beyond_spike_threshold_with_ok_flag() -> None:
+    silent = {"stuck": {"rate_per_sensor_per_h": 0.0, "duration_min": {"min": 6, "max": 8}},
+              "glitch": {"rate_per_sensor_per_h": 10.0, "magnitude_x_spike_threshold": 1.5}}
+    rows = _series(_profile("Z4", silent_faults=silent, sensor_faults=_no_flag_faults()), 600, [1.0, 1.0])
+    threshold = config.get_validation_config()["fields"]["noise_dba"]["spike_threshold"]
+    jumps = [abs(b["noise_dba"] - a["noise_dba"]) for a, b in zip(rows, rows[1:])]
+    assert max(jumps) > threshold
+    assert all(r["sensor_flags"]["noise"] == "ok" for r in rows)
+
+
+def test_default_silent_fault_rates_are_rare() -> None:
+    rows = _series(_profile("Z4"), 2880, [1.0, 1.0])     # 8 h
+    threshold = config.get_validation_config()["fields"]["temp_c"]["spike_threshold"]
+    temps = [r["temp_c"] for r in rows if r["temp_c"] is not None]
+    glitches = sum(1 for a, b in zip(temps, temps[1:]) if abs(b - a) > threshold)
+    assert glitches < 10

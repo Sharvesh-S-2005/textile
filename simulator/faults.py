@@ -5,8 +5,9 @@ Poisson process, stays in it for a random duration, then recovers. While a chann
 is faulted the node publishes `null` for that channel's values with the fault kind
 as its sensor flag (data contract, sections 4 and 6).
 
-Used by machine_model.py. (profiles.py has the same behaviour built in from Day 1;
-it was left as is because it already passes its tests.)
+SensorFaults is used by machine_model.py. (profiles.py has the same behaviour
+built in from Day 1; it was left as is because it already passes its tests.)
+SilentFaults (stuck and glitch failures with an "ok" flag) is used by profiles.py.
 """
 
 from __future__ import annotations
@@ -45,3 +46,53 @@ class SensorFaults:
         """Current sensor flag for `channel`: the fault kind, or "ok"."""
         fault = self._faults[channel]
         return "ok" if fault is None else fault[0]
+
+
+class SilentFaults:
+    """Failures the sensor itself does not notice: its flag stays "ok".
+
+    stuck:  the channel freezes at its last values for a few minutes (a hung I2C
+            read returning a cached value). The backend's stuck-value check exists
+            to catch this.
+    glitch: one reading of the channel's first field jumps by a multiple of that
+            field's spike threshold (a knock on the microphone, a PM laser
+            glitch). The backend's spike check exists to catch this.
+    """
+
+    def __init__(self, channels: dict[str, tuple[str, ...]], cfg: dict[str, Any],
+                 valid_fields: dict[str, dict[str, float]], rng: np.random.Generator) -> None:
+        """Args: channel -> fields map, a `silent_faults` config block, the
+        `validation.fields` ranges/thresholds, and a dedicated generator."""
+        self._channels = channels
+        self._cfg = cfg
+        self._fields = valid_fields
+        self._rng = rng
+        self._stuck: dict[str, tuple[datetime, dict[str, Any]] | None] = {c: None for c in channels}
+
+    @staticmethod
+    def _p(rate_per_h: float, dt_s: float) -> float:
+        return 1.0 - math.exp(-rate_per_h * dt_s / 3600.0)
+
+    def apply(self, ts: datetime, dt_s: float, values: dict[str, Any]) -> dict[str, Any]:
+        """Return `values` with any active stuck or glitch failure applied."""
+        out = dict(values)
+        stuck_cfg, glitch_cfg = self._cfg["stuck"], self._cfg["glitch"]
+        for channel, fields in self._channels.items():
+            stuck = self._stuck[channel]
+            if stuck is not None and ts >= stuck[0]:
+                self._stuck[channel] = stuck = None
+            if stuck is None and self._rng.random() < self._p(stuck_cfg["rate_per_sensor_per_h"], dt_s):
+                bounds = stuck_cfg["duration_min"]
+                until = ts + timedelta(minutes=self._rng.uniform(bounds["min"], bounds["max"]))
+                self._stuck[channel] = stuck = (until, {f: values[f] for f in fields})
+            if stuck is not None:
+                out.update(stuck[1])
+                continue
+            if self._rng.random() < self._p(glitch_cfg["rate_per_sensor_per_h"], dt_s):
+                name = fields[0]
+                spec = self._fields[name]
+                jump = glitch_cfg["magnitude_x_spike_threshold"] * spec["spike_threshold"]
+                value = out[name] + jump if out[name] + jump <= spec["max"] else out[name] - jump
+                value = min(max(value, spec["min"]), spec["max"])
+                out[name] = int(round(value)) if isinstance(out[name], int) else round(value, 1)
+        return out
