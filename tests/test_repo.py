@@ -258,3 +258,27 @@ def test_no_sql_outside_db_repo() -> None:
             if pattern.search(line):
                 offenders.append(f"{rel}:{lineno}: {line.strip()}")
     assert not offenders, offenders
+
+
+def test_savepoint_rolls_back_only_the_failing_message(repo: Repo) -> None:
+    topic = "textile/zone/Z1/env"
+    with repo.savepoint():
+        repo.insert_zone_env(topic, _env("2026-10-28T00:30:00Z"), RX, [])
+    with pytest.raises(RuntimeError):
+        with repo.savepoint():
+            repo.insert_zone_env(topic, _env("2026-10-28T00:30:10Z"), RX, [])
+            raise RuntimeError("boom")
+    with repo.savepoint():
+        repo.insert_zone_env(topic, _env("2026-10-28T00:30:20Z"), RX, [])
+    repo.rollback()   # nothing was committed yet: savepoints must not commit per message
+    assert repo.table_counts()["zone_env"] == 0
+    for ts in ("2026-10-28T00:30:00Z", "2026-10-28T00:30:10Z"):
+        with repo.savepoint():
+            repo.insert_zone_env(topic, _env(ts), RX, [])
+    with pytest.raises(RuntimeError):
+        with repo.savepoint():
+            repo.insert_zone_env(topic, _env("2026-10-28T00:30:20Z"), RX, [])
+            raise RuntimeError("boom")
+    repo.commit()
+    assert [r["ts"] for r in repo.get_zone_env("Z1", "2026-10-28T00:00:00Z", "2026-10-29T00:00:00Z")] == [
+        "2026-10-28T00:30:00Z", "2026-10-28T00:30:10Z"]

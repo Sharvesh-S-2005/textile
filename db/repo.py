@@ -12,11 +12,12 @@ every time-range read is ordered by `ts` - never by arrival order.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 SCHEMA_PATH: Path = Path(__file__).resolve().parent / "schema.sql"
 BUSY_TIMEOUT_MS = 5000
@@ -100,6 +101,26 @@ class Repo:
     def rollback(self) -> None:
         """Discard the current uncommitted batch."""
         self._conn.rollback()
+
+    @contextlib.contextmanager
+    def savepoint(self) -> Iterator[None]:
+        """Make the enclosed writes all-or-nothing within the current batch.
+
+        If the block raises, its writes are rolled back and the exception
+        re-raised; earlier writes in the batch are kept.
+        """
+        # Outside a transaction a SAVEPOINT *is* the transaction and RELEASE would
+        # commit; open the batch transaction first so commits stay batched.
+        if not self._conn.in_transaction:
+            self._conn.execute("BEGIN")
+        self._conn.execute("SAVEPOINT msg")
+        try:
+            yield
+        except BaseException:
+            self._conn.execute("ROLLBACK TO msg")
+            self._conn.execute("RELEASE msg")
+            raise
+        self._conn.execute("RELEASE msg")
 
     def close(self) -> None:
         """Commit anything pending and close the connection."""

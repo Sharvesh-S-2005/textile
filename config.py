@@ -31,6 +31,12 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
         "stuck_value_count", "future_ts_tolerance_s", "late_upload_threshold_s",
     ],
     "paths": ["db_path", "model_dir", "log_dir"],
+    "ingest": [
+        "client_id_suffix", "clean_session", "batch_size", "batch_interval_s", "max_unacked",
+        "queue_poll_s",
+        "reconnect_min_s", "reconnect_max_s", "stats_interval_s", "payload_excerpt_chars",
+        "time_reference",
+    ],
     "devices": ["gate", "ppe_app"],
     "layout": ["adjacency"],
 }
@@ -169,6 +175,11 @@ def get_devices() -> dict[str, Any]:
 def get_adjacency() -> dict[str, list[str]]:
     """Return the zone adjacency map from the `layout` section."""
     return get_config()["layout"]["adjacency"]
+
+
+def get_ingest_config() -> dict[str, Any]:
+    """Return the `ingest` section (batching, reconnect backoff, time reference)."""
+    return get_config()["ingest"]
 
 
 def get_paths() -> dict[str, Any]:

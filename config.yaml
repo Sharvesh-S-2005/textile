@@ -328,6 +328,26 @@ validation:
   future_ts_tolerance_s: 600
   late_upload_threshold_s: 7200
 
+# ingest/subscriber.py
+ingest:
+  client_id_suffix: ingest       # client ID = mqtt.client_id_prefix + "-" + this
+  clean_session: false           # broker queues QoS 1 messages while ingest is down
+  batch_size: 500                # commit after this many messages ...
+  batch_interval_s: 1.0          # ... or this long since the last commit, whichever first,
+  # ... or once this many QoS 1 messages are waiting for their ack. Acks are sent
+  # only after commit, and Mosquitto stops delivering when a client has
+  # max_inflight_messages (default 20) unacked, so a larger batch would stall the
+  # stream at ~20 msg/s. Raise both together if the broker's limit is raised.
+  max_unacked: 20
+  queue_poll_s: 0.2
+  reconnect_min_s: 1             # paho reconnect backoff, doubling up to the max
+  reconnect_max_s: 30
+  stats_interval_s: 10           # default for --stats-interval
+  payload_excerpt_chars: 200     # how much of a failing payload to log
+  # wall: "now" is the wall clock (real hardware). stream: "now" is the newest
+  # accepted telemetry/event ts (replays and accelerated simulation).
+  time_reference: wall
+
 paths:
   db_path: data/textile_ohs.db
   model_dir: models/
