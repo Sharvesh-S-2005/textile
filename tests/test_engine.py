@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import config
 from db.repo import Repo
 from exposure import engine
 
@@ -25,7 +26,8 @@ def test_engine_writes_all_three_tables(engine_db: Path) -> None:
         cumulative = repo.get_exposure_rows("personal_exposure_cumulative", DAY, DAY)
     assert {r["worker_id"] for r in personal} == A_CREW
     assert all(r["label"] == "estimated_personal" and r["wbgt_approximate"] is True for r in personal)
-    assert all(r["engine_version"] == "exposure-1.0" and "niosh" in r["params"] for r in personal)
+    version = config.get_exposure_methods()["personal"]["engine_version"]
+    assert all(r["engine_version"] == version and "niosh" in r["params"] for r in personal)
     assert all(r["dose_niosh_pct"] is not None and r["unaccounted_pct"] is not None for r in personal)
     # Shifts starting on the date that overlap the data: A (whole) and B (partly).
     assert {(r["shift"]) for r in zones} == {"A", "B"} and len(zones) == 2 * 7

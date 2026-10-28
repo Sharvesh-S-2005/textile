@@ -25,8 +25,21 @@ from typing import Any, Iterable, Iterator
 SCHEMA_PATH: Path = Path(__file__).resolve().parent / "schema.sql"
 BUSY_TIMEOUT_MS = 5000
 # PRAGMA user_version. 1 = Day 2 (no epoch columns); 2 = ts_epoch_ms;
-# 3 = materialised exposure tables (new tables only, created by schema.sql).
-SCHEMA_VERSION = 3
+# 3 = materialised exposure tables (new tables only, created by schema.sql);
+# 4 = excluded-anomaly columns on the exposure tables (added by _ensure_columns).
+SCHEMA_VERSION = 4
+# Columns added after a table first shipped: created by schema.sql on new databases,
+# added with ALTER TABLE on older ones. (table -> {column: definition})
+ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "personal_exposure_shift": {
+        "excluded_anomalous_readings": "INTEGER NOT NULL DEFAULT 0",
+        "excluded_absolute_max_candidates": "TEXT NOT NULL DEFAULT '[]'",
+    },
+    "zone_exposure_summary": {
+        "excluded_anomalous_readings": "INTEGER NOT NULL DEFAULT 0",
+        "excluded_absolute_max_candidates": "INTEGER NOT NULL DEFAULT 0",
+    },
+}
 # Tables whose device `ts` gets a `ts_epoch_ms` companion.
 TS_TABLES: tuple[str, ...] = (
     "zone_env", "ble_scans", "ble_sightings", "machine_status", "gate_events",
@@ -59,8 +72,8 @@ ALL_TABLES: tuple[str, ...] = (
 EXPOSURE_TABLES: dict[str, dict[str, Any]] = {
     "personal_exposure_shift": {
         "date_col": "shift_date", "order": "worker_id, session_start_ms",
-        "json": ("session_flags", "absolute_max_events", "coverage_by_metric", "zones_visited", "flags",
-                 "measured_personal", "criteria_sources", "params"),
+        "json": ("session_flags", "absolute_max_events", "excluded_absolute_max_candidates", "coverage_by_metric",
+                 "zones_visited", "flags", "measured_personal", "criteria_sources", "params"),
         "bool": ("wbgt_approximate",),
     },
     "personal_exposure_cumulative": {
@@ -142,8 +155,16 @@ class Repo:
         if self._table_exists("zone_env") and not self._has_column("zone_env", "ts_epoch_ms"):
             self.migrate_to_v2()
         self._conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        self._ensure_columns()
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._conn.commit()
+
+    def _ensure_columns(self) -> None:
+        """Add any ADDED_COLUMNS missing from an older database (idempotent)."""
+        for table, columns in ADDED_COLUMNS.items():
+            for column, definition in columns.items():
+                if self._table_exists(table) and not self._has_column(table, column):
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def schema_version(self) -> int:
         """PRAGMA user_version of this database."""

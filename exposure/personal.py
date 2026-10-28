@@ -20,6 +20,12 @@ Rules implemented here (CLAUDE.md and the Day 3 brief):
   up as lost coverage (flagged `low_data_coverage` below `coverage_flag_pct`).
 * A session with no valid noise reading returns a null result flagged
   `no_valid_readings`, never a zero dose.
+* Records flagged as detected sensor anomalies (`exclude_record_flags`: spike,
+  stuck_value) are excluded from integration and counted in
+  `excluded_anomalous_readings` (they reduce coverage). An excluded reading at or
+  above the 115 dBA absolute maximum is NOT silently dropped: it is listed in
+  `excluded_absolute_max_candidates`, because a real event cannot be told apart
+  from a glitch by the data alone.
 
 Timing: each zone_env reading is the L_Aeq (and the sample) over the 10 s BEFORE
 its ts (contract section 2/4), and is weighted by its exact overlap with the
@@ -54,6 +60,8 @@ class ResultFlag(StrEnum):
     INCOMPLETE_PRESENCE = "incomplete_presence"
     LOW_DATA_COVERAGE = "low_data_coverage"
     ABSOLUTE_MAX_EXCEEDED = "absolute_max_exceeded"
+    ANOMALOUS_READINGS_EXCLUDED = "anomalous_readings_excluded"
+    EXCLUDED_ABSOLUTE_MAX_CANDIDATE = "excluded_absolute_max_candidate"
     SESSION_BOUNDARY_INFERRED = "session_boundary_inferred"
     WBGT_OUTSIDE_APPROXIMATION_RANGE = "wbgt_outside_approximation_range"
 
@@ -71,6 +79,7 @@ class ExposureParams:
     unaccounted_flag_pct: float
     coverage_flag_pct: float
     engine_version: str
+    exclude_record_flags: tuple[str, ...] = ()
 
     @classmethod
     def from_config(cls) -> ExposureParams:
@@ -89,6 +98,7 @@ class ExposureParams:
             unaccounted_flag_pct=float(personal["unaccounted_flag_pct"]),
             coverage_flag_pct=float(personal["coverage_flag_pct"]),
             engine_version=str(personal["engine_version"]),
+            exclude_record_flags=tuple(personal["exclude_record_flags"]),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -119,6 +129,8 @@ class PersonalExposure:
     dose_niosh_pct: float | None
     dose_india_pct: float | None
     absolute_max_events: list[dict[str, Any]]
+    excluded_anomalous_readings: int
+    excluded_absolute_max_candidates: list[dict[str, Any]]
     pm25_twa_raw: float | None
     pm25_twa_corrected: float | None
     pm10_twa_raw: float | None
@@ -215,6 +227,10 @@ def compute_session_exposure(worker_id: str, session_start_ms: int, session_end_
     noise_intervals_with_data = 0.0
     wbgt_above_s, wbgt_max, wbgt_valid_s, wbgt_any_invalid = 0.0, None, 0.0, False
     abs_events: list[dict[str, Any]] = []
+    excluded = 0
+    excluded_loud: list[dict[str, Any]] = []
+    exclude = set(params.exclude_record_flags)
+    loud_db = params.india.absolute_max_db
 
     for iv in intervals:
         a, b = max(iv.start_ms, session_start_ms), min(iv.end_ms, session_end_ms)
@@ -230,6 +246,14 @@ def compute_session_exposure(worker_id: str, session_start_ms: int, session_end_
         for r in iv.readings:
             t = _overlap_s(r["ts_epoch_ms"] - dt_ms, r["ts_epoch_ms"], a, b)
             if t <= 0:
+                continue
+            if exclude & set(r.get("flags") or ()):
+                # A detected sensor anomaly: excluded (lost coverage). A loud one is
+                # still reported, because a real event cannot be told apart from a glitch.
+                excluded += 1
+                if loud_db is not None and r["noise_dba"] is not None and r["noise_dba"] >= loud_db:
+                    excluded_loud.append({"ts": r["ts"], "level_db": r["noise_dba"], "zone_id": iv.zone_id,
+                                          "flags": sorted(r.get("flags") or ())})
                 continue
             if r["noise_dba"] is not None:
                 noise_vals.append((r["noise_dba"], t, r["ts"]))
@@ -299,6 +323,10 @@ def compute_session_exposure(worker_id: str, session_start_ms: int, session_end_
             flags.add(ResultFlag.LOW_DATA_COVERAGE)
     if abs_events:
         flags.add(ResultFlag.ABSOLUTE_MAX_EXCEEDED)
+    if excluded:
+        flags.add(ResultFlag.ANOMALOUS_READINGS_EXCLUDED)
+    if excluded_loud:
+        flags.add(ResultFlag.EXCLUDED_ABSOLUTE_MAX_CANDIDATE)
 
     return PersonalExposure(
         worker_id=worker_id,
@@ -310,6 +338,8 @@ def compute_session_exposure(worker_id: str, session_start_ms: int, session_end_
         dose_niosh_pct=doses["niosh"],
         dose_india_pct=doses["india"],
         absolute_max_events=abs_events,
+        excluded_anomalous_readings=excluded,
+        excluded_absolute_max_candidates=excluded_loud,
         pm25_twa_raw=pm25.mean(),
         pm25_twa_corrected=pm25c.mean(),
         pm10_twa_raw=pm10.mean(),

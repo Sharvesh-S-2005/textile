@@ -402,3 +402,63 @@ latency at zone changes, and its real-world accuracy is untested.
 - ML forecasting (Task A), risk scoring (Task B), SHAP, API, dashboard with the
   `SIMULATED DATA` badge, ESP32 firmware stub, `scripts/run_all.sh`.
 - Localisation tuning on real hardware (calibration walks).
+
+---
+
+## Day 3 — The exposure engine (2026-10-28)
+
+### What was built
+
+| Module | What it does |
+|---|---|
+| `db/` (Task 1a) | `ts_epoch_ms` on every table with a `ts`, parsed once at ingest; every ordered or ranged read uses it. As text, `…:10.500Z` sorted **before** `…:10Z`; reproduced first, then fixed. `Repo.migrate_to_v2` backfilled all three Day 2 databases with row counts unchanged. |
+| `simulator/publisher.py` (1b) | `--align-shifts` (default on): window snapped to shift boundaries plus margins, and only crews whose whole session fits are simulated. Shifts overlap at every handover, so boundaries alone cannot give whole sessions. `--no-align-shifts` keeps the raw window, so the truncated-session flags stay tested. |
+| `exposure/noise.py` | L_Aeq, L_EX,8h, allowed time, dose with per-criterion threshold, 115 dBA absolute maximum. |
+| `exposure/dust.py`, `heat.py` | Linear TWA; κ-Köhler humidity correction (raw always kept); WBGT with Stull wet-bulb, flagged `approximate`. |
+| `exposure/personal.py` | Per-worker, per-session exposure with unaccounted-time and coverage accounting. |
+| `exposure/cumulative.py` | Rolling 7- and 30-day aggregates; partial windows reported as partial. |
+| `exposure/engine.py` | CLI: three materialised tables, idempotent per date, summary table. |
+| `docs/exposure_methods.md` | Formulas, verification table, Schedule XXVIII agreement, assumptions, results. |
+
+### Headline verification
+
+- **All 12 hand-verified noise cases pass**, including 4 h @ 91 dBA = **200%** NIOSH,
+  the **87.4 dBA** energy-average case, and four Schedule XXVIII rows (all six rows
+  checked). The wrong "100%" planning figure appears nowhere.
+- **Internal consistency (single zone): residual ≤ 1×10⁻⁹ dB** in the test, through
+  the real ingest, localisation and session pipelines, and **0.0 dB on the 7-day
+  run data** (W105, Z5, 6.42 h).
+- **7-day run:** 1,071,656 published = 1,071,656 stored (zero loss) at 156 msg/s.
+  140 whole, unflagged sessions. Localisation 96.3% over the week.
+- **Exposure (140 worker-days):** worker-days over 100% are **NIOSH 90.0%** and
+  **India 40.0%**. Median dose is 445% NIOSH and 89% India. Mean coverage is 99.06%
+  and mean unaccounted time 0.15%. Weaving (Z5) drives the highest doses (zone
+  L_Aeq 99.1 dBA) and carding (Z2) the highest dust. Full tables are in
+  `exposure_methods.md` §7.
+
+### Decisions and findings for the reviewer
+
+- **Conservative readings:** the threshold is inclusive, the absolute-max alarm
+  fires at ≥ 115 dBA, and the 115 dBA check uses `noise_dba`, not the peak.
+- **NIOSH 3 dB vs the exact 3.0103 dB:** dose computed directly and dose inferred
+  from L_EX,8h differ by 0.24% (200.0% vs 199.5%). The direct Σ C/T value is
+  reported.
+- **UNKNOWN time is reported, never filled.** Figures cover accounted time and are
+  lower bounds where it is missing. NULL readings lower coverage, not the dose.
+- **κ = 0.05** (small on purpose: a larger κ lowers reported dust). The RH cap at
+  95% is a project assumption.
+- **Finding: glitch readings had entered the doses.** Engine v1.0 integrated 20
+  spike-flagged microphone glitches (120–138 dBA). The maximum session dose was
+  16,688% and there were 20 "≥115 dBA alarms". v1.1 excludes `spike` and
+  `stuck_value` records (lost coverage) and lists excluded ≥115 dBA readings
+  separately instead of dropping them. Results: maximum 3,515%, 0 genuine alarms,
+  20 listed candidates. Validation had flagged every glitch correctly; the engine
+  had ignored the flag.
+- **Process mistake:** commit 6d3cc04 went in with a failing guard test, because
+  `pytest | tail` masked the exit code. It was fixed in the next commit, and exit
+  codes are now checked directly.
+
+### Pending for Day 4
+
+Forecasting (features, baselines, RF, XGBoost, exceedance lead time), SHAP on the
+forecaster, the deterministic risk index, and the results pack.

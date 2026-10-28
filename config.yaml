@@ -339,7 +339,14 @@ exposure_methods:
     unaccounted_flag_pct: 10.0
     # Flag a result whose valid-reading coverage of the accounted time is below this.
     coverage_flag_pct: 90.0
-    engine_version: "exposure-1.0"
+    # Records carrying these validation flags are detected sensor anomalies (a
+    # single-reading jump beyond the spike threshold, or a frozen sensor). They are
+    # excluded from exposure integration - lost coverage, not data. Found on the
+    # 7-day run: glitch readings of 120-138 dBA had entered doses (one 10 s
+    # reading at 135 dBA adds ~3600% NIOSH dose). sensor_not_ok is not listed:
+    # its fields are already null, and a needs_clean PM value reads high (safe side).
+    exclude_record_flags: [spike, stuck_value]
+    engine_version: "exposure-1.1"
 
 # Valid ranges match docs/data_contract.md sections 4-6.
 # spike_threshold = max plausible change between consecutive readings.

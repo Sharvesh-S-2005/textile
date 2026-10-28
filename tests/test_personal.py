@@ -169,7 +169,10 @@ def test_single_zone_personal_l_ex_equals_zone_l_aeq_normalised(pipeline_db: Pat
         # Independent route: the zone's readings whose 10 s windows lie in the stretch.
         rows = repo.get_zone_env(best["zone_id"], from_epoch_ms(best["from_epoch_ms"] + 1),
                                  from_epoch_ms(best["to_epoch_ms"] + 1))
-        levels = [r["noise_dba"] for r in rows if r["noise_dba"] is not None]
+        # Same definition of a valid reading as the engine: non-null and not a detected
+        # anomaly (spike / stuck_value records are excluded on both routes).
+        excluded = set(P.exclude_record_flags)
+        levels = [r["noise_dba"] for r in rows if r["noise_dba"] is not None and not excluded & set(r["flags"])]
         zone_l_aeq = l_aeq(levels, [P.reading_interval_s] * len(levels))
         hours = (best["to_epoch_ms"] - best["from_epoch_ms"]) / H_MS
         expected = l_ex_8h(zone_l_aeq, hours)
@@ -190,3 +193,24 @@ def test_real_session_results_carry_accounting(pipeline_db: Path) -> None:
             assert r.unaccounted_pct is not None and r.data_coverage_pct is not None
             assert r.dose_niosh_pct is not None and r.dose_niosh_pct >= r.dose_india_pct
             assert 0.0 <= r.unaccounted_pct <= 100.0
+
+
+def test_anomaly_flagged_readings_are_excluded_but_loud_ones_still_reported() -> None:
+    """A spike-flagged 135 dBA glitch (Day 3 finding) must not enter the dose, but must
+    stay visible: excluded count, lower coverage, and listed as an excluded >=115 candidate."""
+    end = S0 + 10 * DT_MS
+    clean = readings(S0, end, 90.0)
+    glitched = [dict(r) for r in clean]
+    glitched[4].update(noise_dba=135.0, flags=["spike"])
+    glitched[5].update(flags=["spike"])                   # the jump back down is flagged too
+    base = compute([Interval("Z5", S0, end, clean)], end=end)
+    r = compute([Interval("Z5", S0, end, glitched)], end=end)
+    assert r.dose_niosh_pct == pytest.approx(base.dose_niosh_pct)         # not inflated
+    assert r.absolute_max_events == []
+    assert r.excluded_anomalous_readings == 2
+    assert [c["level_db"] for c in r.excluded_absolute_max_candidates] == [135.0]
+    assert r.data_coverage_pct == pytest.approx(80.0)
+    assert {ResultFlag.ANOMALOUS_READINGS_EXCLUDED, ResultFlag.EXCLUDED_ABSOLUTE_MAX_CANDIDATE} <= set(r.flags)
+    # Not excluded: sensor_not_ok (per-field nulls handle it) and late_upload (valid data).
+    kept = [dict(x, flags=["late_upload"]) for x in clean]
+    assert compute([Interval("Z5", S0, end, kept)], end=end).excluded_anomalous_readings == 0

@@ -250,6 +250,8 @@ CREATE TABLE IF NOT EXISTS personal_exposure_shift (
     dose_niosh_pct          REAL,
     dose_india_pct          REAL,
     absolute_max_events     TEXT NOT NULL,     -- JSON list
+    excluded_anomalous_readings INTEGER NOT NULL DEFAULT 0,   -- spike/stuck records left out
+    excluded_absolute_max_candidates TEXT NOT NULL DEFAULT '[]', -- excluded readings >= 115 dBA (JSON)
     pm25_twa_raw            REAL,              -- indicative (optical PM)
     pm25_twa_corrected      REAL,
     pm10_twa_raw            REAL,
@@ -325,6 +327,8 @@ CREATE TABLE IF NOT EXISTS zone_exposure_summary (
     dose_niosh_pct          REAL,      -- for someone present the whole shift
     dose_india_pct          REAL,
     absolute_max_events     INTEGER NOT NULL,
+    excluded_anomalous_readings INTEGER NOT NULL DEFAULT 0,
+    excluded_absolute_max_candidates INTEGER NOT NULL DEFAULT 0,
     pm25_twa_raw            REAL,
     pm25_twa_corrected      REAL,
     pm10_twa_raw            REAL,

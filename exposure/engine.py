@@ -107,6 +107,8 @@ def zone_rows(repo: Repo, day: str, params: ExposureParams) -> list[dict[str, An
                 "l_aeq_db": r.l_aeq_db, "l_ex_8h_db": r.l_ex_8h_db,
                 "dose_niosh_pct": r.dose_niosh_pct, "dose_india_pct": r.dose_india_pct,
                 "absolute_max_events": len(r.absolute_max_events),
+                "excluded_anomalous_readings": r.excluded_anomalous_readings,
+                "excluded_absolute_max_candidates": len(r.excluded_absolute_max_candidates),
                 "pm25_twa_raw": r.pm25_twa_raw, "pm25_twa_corrected": r.pm25_twa_corrected,
                 "pm10_twa_raw": r.pm10_twa_raw, "pm10_twa_corrected": r.pm10_twa_corrected,
                 "wbgt_max_c": r.wbgt_max_c, "wbgt_time_above_limit_s": r.wbgt_time_above_limit_s,
