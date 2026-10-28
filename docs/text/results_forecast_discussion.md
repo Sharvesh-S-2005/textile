@@ -37,3 +37,20 @@ every day; a real mill's breaks drift and its machines stop for unscheduled
 reasons. The skill on transitions should be expected to fall on real data. The
 steady-state figures are the better guide to what will survive. One week of data
 also gives a single test day, so no confidence interval is reported.
+
+## What drives the 30-minute noise forecast (SHAP)
+
+`ml/explain.py`, `shap.TreeExplainer` on the saved random forest, 2,000 test-day
+rows. Figures: `docs/figures/shap_summary_noise_h30.png`, `shap_bar_noise_h30.png`,
+`shap_waterfall_hit.png`, `shap_waterfall_miss.png`.
+
+Recent noise history carries the largest share of mean |SHAP| (**37%**); the
+30-minute mean is the single strongest feature. Next comes the schedule (**29%**:
+time of day, shift, break), which confirms that much of the skill is the
+timetable. **Machine state is third (21%)**, with maximum machine vibration among
+the top six features. That supports the machine-health-to-noise link the project
+claims, although on simulated data it partly reflects the coupling the simulator
+builds in. Zone identity adds 12%. Temperature, RH, CO2 and occupancy contribute
+under 1% together, which is also sensible: they do not drive noise. On the test day
+every sustained crossing was warned, so the "miss" waterfall shows the issue time
+with the largest under-forecast of a later exceedance, not a missed event.
