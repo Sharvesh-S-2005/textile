@@ -328,6 +328,11 @@ class Repo:
             "SELECT * FROM ble_sightings WHERE ts >= ? AND ts < ? ORDER BY ts, zone_id, tag_id",
             (start_ts, end_ts))
 
+    def get_ble_time_range(self) -> tuple[str, str] | None:
+        """(earliest ts, latest ts) over all BLE scans, or None if there are none."""
+        row = self._conn.execute("SELECT MIN(ts), MAX(ts) FROM ble_scans").fetchone()
+        return None if row[0] is None else (row[0], row[1])
+
     def get_machine_status(self, machine_id: str, start_ts: str, end_ts: str) -> list[dict[str, Any]]:
         """Machine readings in the range, ordered by ts."""
         return self._select(

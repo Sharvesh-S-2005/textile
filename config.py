@@ -31,6 +31,10 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
         "stuck_value_count", "future_ts_tolerance_s", "late_upload_threshold_s",
     ],
     "paths": ["db_path", "model_dir", "log_dir"],
+    "localisation": [
+        "method", "window_s", "ewma_alpha", "rssi_margin_db", "debounce_windows",
+        "absence_windows", "min_rssi_dbm", "missing_rssi_dbm", "confidence_full_margin_db",
+    ],
     "ingest": [
         "client_id_suffix", "clean_session", "batch_size", "batch_interval_s", "max_unacked",
         "queue_poll_s",
@@ -175,6 +179,11 @@ def get_devices() -> dict[str, Any]:
 def get_adjacency() -> dict[str, list[str]]:
     """Return the zone adjacency map from the `layout` section."""
     return get_config()["layout"]["adjacency"]
+
+
+def get_localisation_config() -> dict[str, Any]:
+    """Return the `localisation` section (BLE zone-resolution parameters)."""
+    return get_config()["localisation"]
 
 
 def get_ingest_config() -> dict[str, Any]:
