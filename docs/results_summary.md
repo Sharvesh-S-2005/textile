@@ -4,7 +4,7 @@
 
 | Area | Measure | Value | Source |
 |---|---|---|---|
-| Tests | pytest tests collected | **362** (all passing at last commit) | `pytest` |
+| Tests | pytest tests collected | **379** (all passing at last commit) | `pytest` |
 | Data loss | Day 2 run (8 h, 100×): published + injected = received = stored + rejected | 49,979 + 13 = **49,992** = 49,979 + 13 (dup 0, errors 0) | publisher + ingest logs |
 | Ingest | Day 2 run (8 h, 100×): sustained throughput | **173.6 msg/s** (peak 30-s rate 200.6) | ingest log |
 | Data loss | 7-day run (90×): published + injected = received = stored + rejected | 1,071,656 + 0 = **1,071,656** = 1,071,656 + 0 (dup 0, errors 0) | publisher + ingest logs |
@@ -27,6 +27,6 @@
 | Forecast | noise_dba_h30: 90 dBA crossings warned (hit rate), median lead, false-alarm ratio | 36/36 (100%), **17.0 min**, 12.3% | forecast_metrics.json |
 | Forecast | noise_dba_h60: 90 dBA crossings warned (hit rate), median lead, false-alarm ratio | 36/36 (100%), **18.5 min**, 5.3% | forecast_metrics.json |
 | Explainability | SHAP importance shares, noise t+30 | recent hazard values (lags, rolling stats) 37%, schedule (time of day, shift, break) 29%, machine state 21% | shap_noise_h30.json |
-| Risk index | Bands over 140 worker-days (deterministic_index; weights a design choice) | High 119, Low 14, Medium 7 | worker_risk_index |
+| Risk index | Bands over 140 worker-days (deterministic_index; weights a design choice) | High 110, Low 14, Medium 16 | worker_risk_index |
 
 Negative findings are kept: at 60 min neither ML model beats the seasonal baseline for noise, and for WBGT the seasonal baseline is worse than persistence (`results_forecast.md`).

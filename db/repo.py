@@ -614,6 +614,23 @@ class Repo:
             "SELECT * FROM ppe_entries WHERE ts_epoch_ms >= ? AND ts_epoch_ms < ? ORDER BY ts_epoch_ms, event_id",
             (to_epoch_ms(start_ts), to_epoch_ms(end_ts)))
 
+    def get_device_states(self) -> list[dict[str, Any]]:
+        """Latest stored status message per device (birth or LWT), by arrival."""
+        return self._select(
+            "SELECT d.* FROM device_status d JOIN (SELECT device_id, MAX(id) AS id FROM device_status "
+            "GROUP BY device_id) last ON d.id = last.id ORDER BY d.device_id")
+
+    def get_sensor_flag_counts(self) -> list[dict[str, Any]]:
+        """Counts of non-ok per-sensor flags in zone_env and machine_status (e.g. needs_clean)."""
+        out: list[dict[str, Any]] = []
+        for table, columns in (("zone_env", ("flag_noise", "flag_pm", "flag_temp_rh", "flag_globe", "flag_co2")),
+                               ("machine_status", ("flag_current", "flag_vibration"))):
+            for col in columns:
+                for value, n in self._conn.execute(
+                        f"SELECT {col}, COUNT(*) FROM {table} WHERE {col} != 'ok' GROUP BY {col} ORDER BY {col}"):
+                    out.append({"table": table, "sensor": col.removeprefix("flag_"), "flag": value, "count": int(n)})
+        return out
+
     def get_rejected(self) -> list[dict[str, Any]]:
         """Every rejected record, ordered by arrival."""
         return self._select("SELECT * FROM rejected_records ORDER BY received_ts, id")

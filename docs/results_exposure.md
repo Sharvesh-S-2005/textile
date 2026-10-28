@@ -39,8 +39,8 @@ Shift dates 2026-10-20 → 2026-10-26; 140 worker-sessions, 140 with valid noise
 
 > The weights are a design choice of this project, not a validated clinical model. The respiratory component is relative to the cohort, not to a health threshold. Label: `deterministic_index`.
 
-- 140 worker-days; index min 14.2, median 83.5, max 100.0
-- Bands: High 119, Low 14, Medium 7
-- The hearing component caps at 100% dose, so above the limit the index cannot separate 2× from 34× the allowance; the dose itself is always shown beside it (`exposure_methods.md` §8).
+- 140 worker-days; index min 11.0, median 71.7, max 82.2
+- Bands: High 110, Low 14, Medium 16
+- Hearing uses L_EX,8h (75 → 105 dBA maps to 0 → 100; risk-1.1). risk-1.0 used dose % capped at 100%, which saturated; the dose under both criteria is always shown beside the index. The rating is mostly High because this is a loud mill (`exposure_methods.md` §8).
 
 Figures: `figures/worker_dose_bars.png`, `figures/zone_hour_heatmap.png`, `figures/noise_timeseries_zone.png`.

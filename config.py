@@ -31,7 +31,8 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
         "stuck_value_count", "future_ts_tolerance_s", "late_upload_threshold_s",
     ],
     "paths": ["db_path", "model_dir", "log_dir", "figures_dir"],
-    "dashboard": ["default_db", "cache_ttl_s", "band_colours", "default_worker"],
+    "dashboard": ["default_db", "cache_ttl_s", "band_colours", "default_worker", "vibration_alert_ratio",
+                  "results_numbers"],
     "risk_index": ["version", "weights", "bands", "min_confidence_pct", "hearing", "heat", "respiratory"],
     "ml": [
         "bin_s", "lags_min", "rolling_min", "roc_min", "env_rolling_min", "horizons_min", "targets",

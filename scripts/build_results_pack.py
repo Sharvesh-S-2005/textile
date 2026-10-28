@@ -326,8 +326,9 @@ def write_exposure_md(e: dict[str, Any], path: Path) -> None:
           "component is relative to the cohort, not to a health threshold. Label: `deterministic_index`.", "",
           f"- {r['n']} worker-days; index min {r['min']:.1f}, median {r['median']:.1f}, max {r['max']:.1f}",
           "- Bands: " + ", ".join(f"{k} {v}" for k, v in sorted(r["bands"].items())),
-          "- The hearing component caps at 100% dose, so above the limit the index cannot separate 2× from 34× "
-          "the allowance; the dose itself is always shown beside it (`exposure_methods.md` §8).", "",
+          "- Hearing uses L_EX,8h (75 → 105 dBA maps to 0 → 100; risk-1.1). risk-1.0 used dose % capped at "
+          "100%, which saturated; the dose under both criteria is always shown beside the index. The rating is "
+          "mostly High because this is a loud mill (`exposure_methods.md` §8).", "",
           "Figures: `figures/worker_dose_bars.png`, `figures/zone_hour_heatmap.png`, `figures/noise_timeseries_zone.png`."]
     path.write_text("\n".join(L) + "\n", encoding="utf-8")
 
@@ -440,6 +441,14 @@ def main(argv: list[str] | None = None) -> int:
             "consistency": consistency, "exposure": exposure, "forecast": results,
             "shap": load_json(ROOT / "data" / "shap_noise_h30.json")}
     write_summary_md(DOCS / "results_summary.md", nums)
+    # Machine-readable copy for the dashboard (docs/ is committed; works with nothing running).
+    slim = {k: v for k, v in nums.items() if k != "exposure"}
+    slim["forecast"] = {"split_rule": results["split_rule"], "splits": results["splits"],
+                        "targets": {k: {f: v[f] for f in ("metrics", "chosen", "by_schedule", "exceedance", "n_test")
+                                        if f in v} for k, v in results["targets"].items()}}
+    slim["exposure"] = {k: exposure[k] for k in ("dates", "valid", "over_100_niosh", "over_100_india", "coverage_mean",
+                                                 "unaccounted_mean", "risk")}
+    (DOCS / "results_numbers.json").write_text(json.dumps(slim, indent=2, default=str), encoding="utf-8")
     print(f"results pack written: {len(list(FIG.glob('*.png')))} figures, results_forecast.md, "
           "results_exposure.md, results_summary.md")
     return 0

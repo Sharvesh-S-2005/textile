@@ -366,3 +366,17 @@ def test_read_only_connection_reads_but_refuses_writes(tmp_path: Path) -> None:
     ro.close()
     with pytest.raises(FileNotFoundError):
         Repo(tmp_path / "missing.db", read_only=True)
+
+
+def test_device_states_and_sensor_flag_counts(repo: Repo) -> None:
+    topic = "textile/status/ZN-Z1"
+    birth = {"schema_version": "1.1", "device_id": "ZN-Z1", "ts": "2026-10-28T00:00:00Z", "online": True,
+             "firmware": "sim-0.1.0", "uptime_s": 0, "buffered_records": 0}
+    repo.insert_device_status(topic, birth, RX, [])
+    repo.insert_device_status(topic, {"schema_version": "1.1", "device_id": "ZN-Z1", "online": False}, RX, [])
+    (state,) = repo.get_device_states()
+    assert state["device_id"] == "ZN-Z1" and state["online"] == 0          # latest wins
+    p = _env("2026-10-28T00:30:00Z")
+    p["sensor_flags"]["pm"] = "needs_clean"
+    repo.insert_zone_env("textile/zone/Z1/env", p, RX, ["sensor_not_ok"])
+    assert {"table": "zone_env", "sensor": "pm", "flag": "needs_clean", "count": 1} in repo.get_sensor_flag_counts()

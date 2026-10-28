@@ -21,7 +21,7 @@ def dashboard_db(engine_db: Path) -> Path:
 
 def render(page: str, db: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
     monkeypatch.setenv("OHS_DB", str(db))
-    at = AppTest.from_file(str(ROOT / "dashboard" / "pages" / page), default_timeout=60)
+    at = AppTest.from_file(str(ROOT / "dashboard" / "views" / page), default_timeout=60)
     at.run()
     return at
 

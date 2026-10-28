@@ -20,10 +20,11 @@ import streamlit as st  # noqa: E402
 
 st.set_page_config(page_title="Textile OHS monitor (SIMULATED)", layout="wide")
 
-PAGES = Path(__file__).resolve().parent / "pages"
+# Not named pages/: Streamlit would auto-discover that folder and bypass st.navigation.
+VIEWS = Path(__file__).resolve().parent / "views"
 navigation = st.navigation([
-    st.Page(str(PAGES / "worker_drilldown.py"), title="Worker Drilldown", default=True),
-    st.Page(str(PAGES / "live_zones.py"), title="Live Zones"),
-    st.Page(str(PAGES / "system_results.py"), title="System & Results"),
+    st.Page(str(VIEWS / "worker_drilldown.py"), title="Worker Drilldown", default=True),
+    st.Page(str(VIEWS / "live_zones.py"), title="Live Zones"),
+    st.Page(str(VIEWS / "system_results.py"), title="System & Results"),
 ])
 navigation.run()

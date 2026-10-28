@@ -467,6 +467,11 @@ dashboard:
   # One colour per risk band, same order everywhere; always shown with the band's name.
   band_colours: {Low: "#9E9E9E", Medium: "#CC79A7", High: "#6A3D9A", "insufficient data": "#FFFFFF"}
   default_worker: highest_index          # open the drilldown on the highest-index worker
+  # Machine vibration alert: daily mean running vib_rms_g above this multiple of the
+  # machine's own configured baseline. A design choice: ISO 10816 limits are in
+  # velocity (mm/s), which these accelerometer RMS (g) readings are not.
+  vibration_alert_ratio: 1.2
+  results_numbers: docs/results_numbers.json   # headline numbers written by the results pack
 
 # ml/ - hazard forecasting (Task A). Built only from stored tables via db/repo.py.
 ml:
