@@ -197,9 +197,9 @@ CREATE INDEX IF NOT EXISTS ix_zone_assignments_worker_from ON zone_assignments (
 CREATE TABLE IF NOT EXISTS worker_sessions (
     id                 INTEGER PRIMARY KEY,
     worker_id          TEXT NOT NULL,
-    session_start      TEXT,         -- NULL for an orphan check-out
-    session_end        TEXT NOT NULL,
-    duration_s         INTEGER,      -- NULL when the start is unknown
+    session_start      TEXT,         -- inferred shift start for an orphan check-out (flagged)
+    session_end        TEXT NOT NULL,  -- inferred shift end for an unmatched check-in (flagged)
+    duration_s         INTEGER,
     shift              TEXT NOT NULL,
     flags              TEXT NOT NULL DEFAULT '[]',
     check_in_event_id  TEXT,

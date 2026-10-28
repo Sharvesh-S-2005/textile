@@ -42,11 +42,13 @@ def test_unmatched_check_in_is_closed_at_shift_end_and_flagged() -> None:
     assert s["flags"] == [SessionFlag.UNMATCHED_CHECK_IN]
 
 
-def test_orphan_check_out_is_recorded_and_flagged() -> None:
+def test_orphan_check_out_is_recorded_with_inferred_shift_start_and_flagged() -> None:
     (s,) = build([ev("2026-10-28T08:35:00Z", "check_out")])
-    assert s["session_start"] is None and s["duration_s"] is None
+    assert s["session_start"] == "2026-10-28T00:30:00Z"   # inferred: start of that shift A
     assert s["session_end"] == "2026-10-28T08:35:00Z"
+    assert s["duration_s"] == 8 * 3600 + 5 * 60
     assert s["flags"] == [SessionFlag.ORPHAN_CHECK_OUT]
+    assert s["check_in_event_id"] is None
 
 
 def test_two_consecutive_check_ins_are_flagged_duplicate() -> None:
@@ -100,10 +102,17 @@ def test_clipping_splits_an_assignment_that_crosses_a_boundary() -> None:
         ("2026-10-28T00:20:00Z", "2026-10-28T00:40:00Z", False)]
 
 
-def test_orphan_check_out_covers_nothing() -> None:
-    orphan = {"worker_id": "W101", "session_start": None, "session_end": "2026-10-28T08:35:00Z"}
-    (r,) = clip_assignments([_a("2026-10-28T01:00:00Z", "2026-10-28T02:00:00Z")], [orphan])
-    assert r["outside_session"] is True
+def test_orphan_check_out_covers_its_inferred_shift() -> None:
+    """Data starting mid-shift must not erase the real end of that shift (under-reporting)."""
+    (orphan,) = build([ev("2026-10-28T08:35:00Z", "check_out")])
+    rows = clip_assignments([_a("2026-10-28T00:10:00Z", "2026-10-28T02:00:00Z")], [orphan])
+    assert [(r["from_ts"], r["outside_session"]) for r in rows] == [
+        ("2026-10-28T00:10:00Z", True), ("2026-10-28T00:30:00Z", False)]
+
+
+def test_orphan_check_out_just_after_midnight_for_night_shift() -> None:
+    (s,) = build([ev("2026-10-28T00:35:00Z", "check_out", "W116")])   # C shift ends 00:30Z
+    assert s["session_start"] == "2026-10-27T16:30:00Z" and s["shift"] == "C"
 
 
 def test_sessions_of_other_workers_do_not_count() -> None:

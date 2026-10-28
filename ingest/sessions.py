@@ -8,17 +8,22 @@ Pairing, per worker in ts order:
   check_in  -> opens a session. If one is already open, the session is flagged
                `duplicate_check_in` and keeps its first check-in as the start
                (a double tap is the usual cause).
-  check_out -> closes the open session. With none open it becomes a session with
-               no start, flagged `orphan_check_out`.
-  still open at the end -> closed at the end of its shift and flagged
-               `unmatched_check_in`.
+  check_out -> closes the open session. With none open, the session's start is
+               inferred as the start of its shift, and it is flagged
+               `orphan_check_out` (the start is an inference, not a tap).
+  still open at the end -> the end is inferred as the end of its shift, and it
+               is flagged `unmatched_check_in`.
 Any session longer than `sessions.max_session_h` is also flagged
 `implausible_duration`.
 
+The two inferred cases are deliberately symmetric. Treating an orphan check-out as
+covering nothing would erase the real end of a shift (for example, the night shift
+when data starts mid-shift), and under-reporting exposure is the unsafe direction
+for an occupational-health system. The flags keep every inference visible.
+
 Clipping: a worker who is not checked in cannot be accruing exposure, whatever a
 stray BLE sighting suggests. Assignments are split at session boundaries, and
-pieces outside every session are kept but marked `outside_session`. An orphan
-check-out has no known start, so it never covers an assignment.
+pieces outside every session are kept but marked `outside_session`.
 """
 
 from __future__ import annotations
@@ -99,10 +104,10 @@ def build_sessions(events: list[dict[str, Any]], schedule: ShiftSchedule,
                 open_session = None
             else:
                 inst = _nearest_shift(schedule, shift_id, ts, "end")
-                sessions.append({"worker_id": worker_id, "session_start": None, "session_end": _iso(ts),
-                                 "duration_s": None, "shift": inst.shift_id,
-                                 "flags": [SessionFlag.ORPHAN_CHECK_OUT.value],
-                                 "check_in_event_id": None, "check_out_event_id": e["event_id"]})
+                start = min(inst.start, ts)          # never after the check-out itself
+                orphan = {"worker_id": worker_id, "start": start, "shift": inst.shift_id,
+                          "flags": {SessionFlag.ORPHAN_CHECK_OUT}, "check_in_event_id": None}
+                sessions.append(_close(orphan, ts, e["event_id"], max_session_h))
         if open_session is not None:
             open_session["flags"].add(SessionFlag.UNMATCHED_CHECK_IN)
             sessions.append(_close(open_session, open_session["shift_end"], None, max_session_h))
@@ -129,8 +134,7 @@ def clip_assignments(assignments: list[dict[str, Any]], sessions: list[dict[str,
     """
     spans: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for s in sessions:
-        if s["session_start"] is not None:      # an orphan check-out covers nothing
-            spans[s["worker_id"]].append((s["session_start"], s["session_end"]))
+        spans[s["worker_id"]].append((s["session_start"], s["session_end"]))
 
     out: list[dict[str, Any]] = []
     for a in assignments:
