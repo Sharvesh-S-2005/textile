@@ -631,6 +631,35 @@ class Repo:
                     out.append({"table": table, "sensor": col.removeprefix("flag_"), "flag": value, "count": int(n)})
         return out
 
+    def export_demo_copy(self, dest: Path | str, raw_start_ts: str, raw_end_ts: str,
+                         keep_ble: bool = False) -> dict[str, int]:
+        """Write a compact copy of this database to `dest` for an offline demo.
+
+        Every derived table (exposure, risk, cumulative, sessions, assignments,
+        status, rejections) is copied in full; raw telemetry (zone_env,
+        machine_status, and BLE if keep_ble) is kept only for [raw_start_ts,
+        raw_end_ts); raw BLE is otherwise dropped (no dashboard page reads it). This
+        database is never modified. Returns the copy's row counts.
+        """
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.unlink(missing_ok=True)
+        target = sqlite3.connect(str(dest))
+        self._conn.backup(target)
+        lo, hi = to_epoch_ms(raw_start_ts), to_epoch_ms(raw_end_ts)
+        target.execute("PRAGMA foreign_keys=OFF")
+        for table in ("ble_sightings", "ble_scans", "zone_env", "machine_status"):
+            if table.startswith("ble") and not keep_ble:
+                target.execute(f"DELETE FROM {table}")
+            else:
+                target.execute(f"DELETE FROM {table} WHERE ts_epoch_ms < ? OR ts_epoch_ms >= ?", (lo, hi))
+        target.commit()
+        target.execute("PRAGMA journal_mode=DELETE")    # a single self-contained file
+        target.execute("VACUUM")
+        counts = {t: int(target.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]) for t in ALL_TABLES}
+        target.close()
+        return counts
+
     def get_rejected(self) -> list[dict[str, Any]]:
         """Every rejected record, ordered by arrival."""
         return self._select("SELECT * FROM rejected_records ORDER BY received_ts, id")

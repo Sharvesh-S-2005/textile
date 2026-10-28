@@ -1,0 +1,7 @@
+# Offline-safe demo settings: no usage-statistics calls to the internet.
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+address = "localhost"

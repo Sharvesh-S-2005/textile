@@ -4,7 +4,7 @@
 
 | Area | Measure | Value | Source |
 |---|---|---|---|
-| Tests | pytest tests collected | **379** (all passing at last commit) | `pytest` |
+| Tests | pytest tests collected | **380** (all passing at last commit) | `pytest` |
 | Data loss | Day 2 run (8 h, 100×): published + injected = received = stored + rejected | 49,979 + 13 = **49,992** = 49,979 + 13 (dup 0, errors 0) | publisher + ingest logs |
 | Ingest | Day 2 run (8 h, 100×): sustained throughput | **173.6 msg/s** (peak 30-s rate 200.6) | ingest log |
 | Data loss | 7-day run (90×): published + injected = received = stored + rejected | 1,071,656 + 0 = **1,071,656** = 1,071,656 + 0 (dup 0, errors 0) | publisher + ingest logs |

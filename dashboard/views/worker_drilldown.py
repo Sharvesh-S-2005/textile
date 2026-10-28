@@ -123,6 +123,9 @@ fig.update_xaxes(title_text=f"time ({TZ})", row=2, col=1)
 fig.update_xaxes(type="date")       # row 1 holds only shapes; without this its axis is inferred as linear
 fig.update_layout(height=420, margin={"t": 10, "b": 10}, legend={"orientation": "h", "y": -0.18})
 st.plotly_chart(fig, use_container_width=True)
+if not noise_frames:
+    st.info("No raw zone telemetry for this date in this database (the offline demo copy keeps raw readings for "
+            "its demo day only). The exposure figures above come from the stored results and are complete.")
 
 # ---------------------------------------------------------------- risk index panel
 st.markdown(f"**{INDEX_CAVEAT}**")

@@ -83,3 +83,21 @@ def test_dashboard_contains_no_sql() -> None:
     pattern = re.compile(rf"\b({verbs})\b[^\n]*\b(FROM|INTO|SET|WHERE)\b")
     for path in (ROOT / "dashboard").rglob("*.py"):
         assert not pattern.search(path.read_text(encoding="utf-8")), path.name
+
+
+def test_demo_copy_keeps_results_and_one_day_of_raw(dashboard_db: Path, tmp_path: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """The offline demo copy: every derived table in full, raw telemetry for one day,
+    no raw BLE; the source is untouched and every page still renders from the copy."""
+    with Repo(dashboard_db, read_only=True) as src:
+        before = src.table_counts()
+        demo = tmp_path / "demo.db"
+        counts = src.export_demo_copy(demo, "2026-10-28T02:00:00Z", "2026-10-28T03:00:00Z")
+        assert src.table_counts() == before                                   # source never modified
+    for t in ("personal_exposure_shift", "worker_risk_index", "zone_assignments", "worker_sessions",
+              "personal_exposure_cumulative", "device_status"):
+        assert counts[t] == before[t], t
+    assert 0 < counts["zone_env"] < before["zone_env"] and counts["ble_sightings"] == 0
+    for page in PAGES:
+        at = render(page, demo, monkeypatch)
+        assert not at.exception, (page, at.exception)
