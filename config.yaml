@@ -312,6 +312,25 @@ exposure_limits:
   wbgt_work_category: moderate
   rh_correction_threshold_pct: 75
 
+# Parameters of the exposure methods (exposure/). Assumptions, not measurements.
+exposure_methods:
+  pm_humidity_correction:
+    # C_corr = C_raw / (1 + kappa * a_w / (1 - a_w)), a_w = RH/100 (Crilley et al. 2018).
+    # Crilley et al. fitted kappa ~0.4 for ambient UK aerosol on an OPC-N2. Cotton dust
+    # is fibrous cellulose, far less hygroscopic, so kappa is set low. A larger kappa
+    # LOWERS the reported dust (the unsafe direction); 0.05 barely corrects and errs
+    # toward over-reporting. An assumption of this project, not a measured value.
+    kappa: 0.05
+    # The form diverges as RH -> 100%. Above this RH, a_w is capped (project
+    # assumption for numerical stability, not part of the cited method).
+    rh_cap_pct: 95.0
+    method: "kappa_koehler_crilley_2018"
+    source: "Crilley et al. (2018), Atmospheric Measurement Techniques 11, 709-720"
+  dust_label: indicative           # optical PM is never compared with regulatory limits
+  wbgt:
+    t_nw_method: stull_psychrometric_approximation
+    source: "ISO 7243:2017 (WBGT); Stull (2011), J. Appl. Meteor. Climatol. 50, 2267-2269"
+
 # Valid ranges match docs/data_contract.md sections 4-6.
 # spike_threshold = max plausible change between consecutive readings.
 validation:

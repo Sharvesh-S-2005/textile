@@ -36,6 +36,7 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
         "absence_windows", "min_rssi_dbm", "missing_rssi_dbm", "confidence_full_margin_db",
     ],
     "sessions": ["max_session_h"],
+    "exposure_methods": ["pm_humidity_correction", "dust_label", "wbgt"],
     "ingest": [
         "client_id_suffix", "clean_session", "batch_size", "batch_interval_s", "max_unacked",
         "queue_poll_s",
@@ -185,6 +186,11 @@ def get_adjacency() -> dict[str, list[str]]:
 def get_localisation_config() -> dict[str, Any]:
     """Return the `localisation` section (BLE zone-resolution parameters)."""
     return get_config()["localisation"]
+
+
+def get_exposure_methods() -> dict[str, Any]:
+    """Return the `exposure_methods` section (PM correction, dust label, WBGT method)."""
+    return get_config()["exposure_methods"]
 
 
 def get_sessions_config() -> dict[str, Any]:
