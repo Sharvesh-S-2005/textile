@@ -30,7 +30,12 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
         "fields", "allowed_sensor_flags", "allowed_ppe_values", "allowed_rfid_events",
         "stuck_value_count", "future_ts_tolerance_s", "late_upload_threshold_s",
     ],
-    "paths": ["db_path", "model_dir", "log_dir"],
+    "paths": ["db_path", "model_dir", "log_dir", "figures_dir"],
+    "ml": [
+        "bin_s", "lags_min", "rolling_min", "roc_min", "env_rolling_min", "horizons_min", "targets",
+        "split_days", "split_fallback_fractions", "random_seed", "random_forest", "xgboost",
+        "exceedance_criterion", "features_path", "predictions_path", "metrics_path",
+    ],
     "localisation": [
         "method", "window_s", "ewma_alpha", "rssi_margin_db", "debounce_windows",
         "absence_windows", "min_rssi_dbm", "missing_rssi_dbm", "confidence_full_margin_db",
@@ -201,6 +206,11 @@ def get_sessions_config() -> dict[str, Any]:
 def get_ingest_config() -> dict[str, Any]:
     """Return the `ingest` section (batching, reconnect backoff, time reference)."""
     return get_config()["ingest"]
+
+
+def get_ml_config() -> dict[str, Any]:
+    """Return the `ml` section (feature, split, model and output settings)."""
+    return get_config()["ml"]
 
 
 def get_paths() -> dict[str, Any]:
