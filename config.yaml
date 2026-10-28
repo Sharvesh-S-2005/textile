@@ -330,6 +330,16 @@ exposure_methods:
   wbgt:
     t_nw_method: stull_psychrometric_approximation
     source: "ISO 7243:2017 (WBGT); Stull (2011), J. Appl. Meteor. Climatol. 50, 2267-2269"
+  personal:
+    # Contract section 2: zone nodes publish env every 10 s; each reading is the
+    # L_Aeq over the 10 s BEFORE its ts.
+    env_reading_interval_s: 10
+    # Flag a result whose zone presence is unknown for more than this share of
+    # the session (its figures cover accounted time only: lower bounds).
+    unaccounted_flag_pct: 10.0
+    # Flag a result whose valid-reading coverage of the accounted time is below this.
+    coverage_flag_pct: 90.0
+    engine_version: "exposure-1.0"
 
 # Valid ranges match docs/data_contract.md sections 4-6.
 # spike_threshold = max plausible change between consecutive readings.

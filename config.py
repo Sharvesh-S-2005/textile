@@ -36,7 +36,7 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
         "absence_windows", "min_rssi_dbm", "missing_rssi_dbm", "confidence_full_margin_db",
     ],
     "sessions": ["max_session_h"],
-    "exposure_methods": ["pm_humidity_correction", "dust_label", "wbgt"],
+    "exposure_methods": ["pm_humidity_correction", "dust_label", "wbgt", "personal"],
     "ingest": [
         "client_id_suffix", "clean_session", "batch_size", "batch_interval_s", "max_unacked",
         "queue_poll_s",
