@@ -58,5 +58,6 @@ def colour_for_target(target: str) -> str:
 
 def simulated_badge(ax: Any) -> None:
     """Mark a figure as SIMULATED DATA (CLAUDE.md: visible on everything this phase)."""
-    ax.text(0.995, 1.01, "SIMULATED DATA", transform=ax.transAxes, ha="right", va="bottom", fontsize=11,
+    # Above the title row (titles sit at y = 1.0 + pad), so the badge never overlaps them.
+    ax.text(1.0, 1.09, "SIMULATED DATA", transform=ax.transAxes, ha="right", va="bottom", fontsize=11,
             fontweight="bold", color="white", bbox={"boxstyle": "round,pad=0.25", "fc": "#B2182B", "ec": "none"})

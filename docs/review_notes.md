@@ -462,3 +462,78 @@ latency at zone changes, and its real-world accuracy is untested.
 
 Forecasting (features, baselines, RF, XGBoost, exceedance lead time), SHAP on the
 forecaster, the deterministic risk index, and the results pack.
+
+---
+
+## Day 4 — Forecasting, explainability, risk index (2026-10-28)
+
+Scope decisions kept: **no FastAPI** (the dashboard reads SQLite through
+`db/repo.py`); **no ML risk classifier** (it would only re-learn the dose
+thresholds). SHAP is applied to the forecaster.
+
+### What was built
+
+| Module | What it does |
+|---|---|
+| `ml/features.py` | One row per zone per 1-minute bin (71,897 rows, 60 features, mean coverage 99.19%) from stored tables only. Noise resampled and rolling-averaged in the energy domain. Anomaly, NULL and non-ok sensor values are excluded, never zeroed. |
+| `ml/forecast.py` | Persistence, seasonal, random forest, XGBoost; whole-day chronological split with a boundary purge; skill, MAE, RMSE, R²; steady vs schedule-transition subsets; exceedance lead time. |
+| `ml/explain.py` | SHAP `TreeExplainer` on the saved noise t+30 model: beeswarm, bar, and two waterfalls. |
+| `exposure/risk_index.py` | Deterministic, transparent index (`deterministic_index`) and the `worker_risk_index` table. |
+| `figstyle.py` | One colour per hazard (Okabe-Ito), no colour-only encoding, slide-legible fonts, SIMULATED DATA badge. |
+| `scripts/build_results_pack.py` | Idempotent pack: 9 figures, `results_forecast.md`, `results_exposure.md`, `results_summary.md`. Every number is read from its source, and the consistency residual is re-measured. |
+
+### Leakage protection (tests, not comments)
+
+- Every feature declares its source offset relative to *t* (all ≤ 0).
+- **Truncation test:** features rebuilt from data cut off at *t* are identical to the
+  full-data features at *t*, checked on real pipeline data.
+- Two subtle leaks avoided: `workers_present_count` uses the previous *complete*
+  BLE window, and it ignores `outside_session`, which depends on a future check-out
+  time.
+
+### Headline results (test day 2026-10-26; full tables in `results_forecast.md`)
+
+| Target | Seasonal skill | RF | XGBoost | Note |
+|---|---|---|---|---|
+| Noise t+30 | +0.765 | **+0.805** | +0.745 | RF beats the seasonal baseline |
+| Noise t+60 | +0.766 | +0.741 | +0.746 | **Negative finding:** no ML model beats the seasonal baseline |
+| PM2.5 t+30 / t+60 | +0.254 / +0.298 | +0.344 / +0.401 | **+0.384 / +0.434** | clearest ML result |
+| WBGT t+30 / t+60 | **−0.280 / −0.040** | +0.048 / +0.149 | +0.125 / +0.214 | seasonal is worse than persistence; heat is barely predictable |
+
+- **Timetable vs forecasting.** Most of the noise skill is the fixed break and shift
+  schedule. On steady rows (no scheduled change within the horizon), ML noise skill
+  is +0.56–0.62, against +0.39–0.51 for the seasonal baseline: genuine skill beyond
+  the timetable.
+- **Exceedance (90 dBA).** 36/36 sustained crossings were warned, median lead
+  17.0 min (t+30) and 18.5 min (t+60). False-alarm ratio 12.3% / 5.3%, against
+  36–42% for the seasonal baseline. Persistence cannot warn ahead by definition.
+  The crossings are mostly post-break restarts, so the lead time reflects the
+  schedule too.
+- **SHAP (noise t+30).** Recent noise history 37%, schedule 29%, machine state 21%
+  (maximum vibration in the top six), zone 12%, ambient and occupancy under 1%.
+- **Risk index.** 140 worker-days: High 119, Medium 7, Low 14; median 83.5.
+  Contributions sum to 100%; monotonicity is tested over 7 inputs × 200 random
+  baselines; low confidence suppresses the band, not the number; PPE is never
+  applied.
+
+### Findings and limitations to state at review
+
+- **The index's hearing cap hides severity above 100% dose.** W102 (carding, 235%)
+  ranks above W105 (weaving, 3,378%), because both hearing components cap at 100
+  and carding is the dustiest zone. The dose is always shown beside the index; a
+  log-scaled hearing component is a documented option, not applied.
+- The respiratory component is **cohort-relative**: it ranks, it does not judge
+  safety.
+- The simulated schedule is rigid. Transition skill should be expected to fall on
+  real data; the steady-state figures are the better guide. With a single test day,
+  there are no confidence intervals.
+- **Process:** e398a5c was committed with a failing test (chained with `;`) and was
+  fixed in the next commit. Every commit since is gated on a separately captured
+  pytest exit code.
+
+### Pending for Day 5
+
+The Streamlit dashboard: it reads the materialised tables and parquet files; shows
+the SIMULATED DATA badge, the risk-index weights caveat and the WBGT approximation
+flag in the UI; and uses the results-pack figures. Optional LSTM/GRU only after
+everything else.
