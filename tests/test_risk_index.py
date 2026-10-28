@@ -17,8 +17,8 @@ METRICS = P.respiratory_metrics
 
 
 def worker(**over: object) -> dict:
-    w = {"worker_id": "W1", "date": "2026-10-26", "dose_pct": 100.0, "dose_criterion": "NIOSH",
-         "mean_daily_dose_7d_pct": 100.0, "wbgt_max_c": 25.0, "wbgt_hours_above": 0.0,
+    w = {"worker_id": "W1", "date": "2026-10-26", "l_ex_8h_db": 85.0, "mean_daily_l_ex_7d_db": 85.0,
+         "dose_niosh_pct": 100.0, "dose_india_pct": 0.0, "wbgt_max_c": 25.0, "wbgt_hours_above": 0.0,
          "pm25_twa_raw": 10.0, "pm10_twa_raw": 20.0, "pm25_twa_hours_raw_7d": 80.0,
          "data_coverage_pct": 99.0, "unaccounted_pct": 0.5, "ppe_status": {"hearing_ppe": "worn"}}
     w.update(over)
@@ -37,15 +37,17 @@ def test_contributions_sum_to_100_percent_of_the_overall_index() -> None:
 
 
 def test_exactly_100_percent_dose_with_nothing_else_elevated() -> None:
-    """Hearing: (0.5*100 + 0.5*100)/1 = 100 (100% dose -> 100). Heat: WBGT 25 C is below the
-    ramp start (28 - 2 = 26 C) and 0 h above -> 0. Respiratory: lowest of the cohort on
-    every metric -> rank 0. Overall = (100 + 0 + 0)/3 = 33.33 -> Medium (33 <= x < 66)."""
+    """100% NIOSH dose over 8 h is L_EX,8h = 85 dBA (today and 7-day mean).
+    Hearing: (85 - 75) / (105 - 75) x 100 = 33.33. Heat: WBGT 25 C is below the ramp start
+    (28 - 2 = 26 C), 0 h above -> 0. Respiratory: lowest of the cohort -> 0.
+    Overall = 33.33 / 3 = 11.11 -> Low (< 33). The dose is reported beside it."""
     r = compute_index(worker(), COHORT, P)
-    assert r["components"] == {"hearing": pytest.approx(100.0), "heat": 0.0, "respiratory": 0.0}
-    assert r["overall_index"] == pytest.approx(100.0 / 3)
-    assert r["band"] == "Medium"
+    assert r["components"] == {"hearing": pytest.approx(100 / 3), "heat": 0.0, "respiratory": 0.0}
+    assert r["overall_index"] == pytest.approx(100 / 9)
+    assert r["band"] == "Low"
     assert r["contributions"]["hearing"]["percent"] == pytest.approx(100.0)
-    assert r["drivers"] == ["noise dose 100% of the daily allowance (NIOSH)"]
+    assert r["drivers"] == ["noise L_EX,8h 85.0 dBA (dose 100% NIOSH, 0% India)"]
+    assert (r["dose_niosh_pct"], r["dose_india_pct"], r["l_ex_8h_db"]) == (100.0, 0.0, 85.0)
 
 
 def test_hand_values_for_heat_and_ranks() -> None:
@@ -57,20 +59,22 @@ def test_hand_values_for_heat_and_ranks() -> None:
     assert percentile_rank(10.0, COHORT["pm25_twa_raw"]) == 0.0
     assert percentile_rank(200.0, COHORT["pm25_twa_raw"]) == 100.0
     assert percentile_rank(5.0, [5.0]) == 0.0                     # nobody to rank against
-    assert hearing_component(300.0, 300.0, P) == 100.0             # capped: saturates above 100%
-    assert hearing_component(50.0, 30.0, P) == pytest.approx(40.0)
+    assert hearing_component(90.0, 90.0, P) == pytest.approx(50.0)   # (90 - 75) / 30
+    assert hearing_component(105.0, 110.0, P) == 100.0              # clamped at the ceiling
+    assert hearing_component(70.0, 60.0, P) == 0.0                  # clamped at the floor
+    assert hearing_component(95.0, 85.0, P) == pytest.approx((200 / 3 + 100 / 3) / 2)
 
 
 def test_changing_a_weight_moves_the_output_in_the_expected_direction() -> None:
-    """Doubling the hearing weight for a hearing-driven worker: (2*100 + 0 + 0)/4 = 50 > 33.33.
-    Doubling the heat weight instead lowers it: 100/4 = 25."""
+    """Hearing-only worker, hearing 33.33. Doubling the hearing weight: 2*33.33/4 = 16.67 > 11.11.
+    Doubling the heat weight instead lowers it: 33.33/4 = 8.33."""
     base = compute_index(worker(), COHORT, P)["overall_index"]
     heavy_hearing = copy.deepcopy(P.weights) | {"hearing": 2.0}
     heavy_heat = copy.deepcopy(P.weights) | {"heat": 2.0}
     up = compute_index(worker(), COHORT, RiskParams(**{**P.__dict__, "weights": heavy_hearing}))["overall_index"]
     down = compute_index(worker(), COHORT, RiskParams(**{**P.__dict__, "weights": heavy_heat}))["overall_index"]
-    assert up == pytest.approx(50.0) and up > base
-    assert down == pytest.approx(25.0) and down < base
+    assert up == pytest.approx(100 / 6) and up > base
+    assert down == pytest.approx(100 / 12) and down < base
 
 
 def test_low_confidence_suppresses_the_band_not_the_number() -> None:
@@ -84,7 +88,7 @@ def test_low_confidence_suppresses_the_band_not_the_number() -> None:
 
 
 @pytest.mark.parametrize("field,low,high", [
-    ("dose_pct", 20.0, 80.0), ("mean_daily_dose_7d_pct", 20.0, 90.0), ("wbgt_max_c", 27.0, 31.0),
+    ("l_ex_8h_db", 70.0, 110.0), ("mean_daily_l_ex_7d_db", 70.0, 110.0), ("wbgt_max_c", 27.0, 31.0),
     ("wbgt_hours_above", 0.5, 3.0), ("pm25_twa_raw", 10.0, 150.0), ("pm10_twa_raw", 20.0, 300.0),
     ("pm25_twa_hours_raw_7d", 80.0, 1000.0)])
 def test_index_is_monotonic_in_each_input_with_the_others_fixed(field: str, low: float, high: float) -> None:
@@ -92,7 +96,7 @@ def test_index_is_monotonic_in_each_input_with_the_others_fixed(field: str, low:
     baselines, raising one input (others fixed, cohort fixed) never lowers any output."""
     rng = np.random.default_rng(hash(field) % 2**32)
     for _ in range(200):
-        base = worker(dose_pct=rng.uniform(0, 400), mean_daily_dose_7d_pct=rng.uniform(0, 400),
+        base = worker(l_ex_8h_db=rng.uniform(70, 110), mean_daily_l_ex_7d_db=rng.uniform(70, 110),
                       wbgt_max_c=rng.uniform(20, 40), wbgt_hours_above=rng.uniform(0, 8),
                       pm25_twa_raw=rng.uniform(0, 300), pm10_twa_raw=rng.uniform(0, 600),
                       pm25_twa_hours_raw_7d=rng.uniform(0, 2000))
@@ -133,3 +137,16 @@ def test_engine_writes_risk_rows(engine_db: Path) -> None:
         assert sum(c["percent"] for c in r["contributions"].values()) == pytest.approx(100.0)
         assert r["band"] in ("Low", "Medium", "High", "insufficient data")
         assert "never reduces" in r["ppe_status"].get("note", "never reduces")
+
+
+
+def test_regression_higher_l_ex_never_scores_below_lower_l_ex() -> None:
+    """Regression for the risk-1.0 bug: dose % capped at 100% could not separate 235% from
+    3,378%, so a far louder worker could rank lower. With other components equal, a
+    materially higher L_EX,8h must never score below a lower one, including well above
+    the 100%-dose point (85 dBA) where 1.0 saturated."""
+    for low, high in ((88.8, 100.4), (85.0, 86.0), (90.0, 104.0), (95.0, 99.0)):
+        quieter = compute_index(worker(l_ex_8h_db=low, mean_daily_l_ex_7d_db=low), COHORT, P)
+        louder = compute_index(worker(l_ex_8h_db=high, mean_daily_l_ex_7d_db=high), COHORT, P)
+        assert louder["components"]["hearing"] > quieter["components"]["hearing"], (low, high)
+        assert louder["overall_index"] > quieter["overall_index"], (low, high)

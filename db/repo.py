@@ -35,6 +35,7 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "excluded_anomalous_readings": "INTEGER NOT NULL DEFAULT 0",
         "excluded_absolute_max_candidates": "TEXT NOT NULL DEFAULT '[]'",
     },
+    "worker_risk_index": {"l_ex_8h_db": "REAL", "dose_niosh_pct": "REAL", "dose_india_pct": "REAL"},
     "zone_exposure_summary": {
         "excluded_anomalous_readings": "INTEGER NOT NULL DEFAULT 0",
         "excluded_absolute_max_candidates": "INTEGER NOT NULL DEFAULT 0",

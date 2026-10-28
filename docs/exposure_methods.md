@@ -358,7 +358,7 @@ with totals equal to the 7-day totals: never scaled up.
 
 | Component (0–100) | From | Normalisation |
 |---|---|---|
-| Hearing | Day's noise dose and 7-day mean daily dose, taking the higher of NIOSH and India | ½·today + ½·7-day mean, as % of the daily allowance; **100% dose → 100**, capped (saturates above 100%) |
+| Hearing | L_EX,8h: today's value and the 7-day energy-mean daily value (ISO 9612) | ½·today + ½·7-day mean, each mapped linearly **75 dBA → 0, 105 dBA → 100**, clamped at both ends (risk-1.1) |
 | Heat | WBGT maximum; hours above the ISO 7243 reference (28 °C, moderate work) | Mean of two ramps: WBGT 26 → 34 °C maps to 0 → 100; 0 → 4 h above maps to 0 → 100 |
 | Respiratory | PM2.5 TWA, PM10 TWA, 7-day PM2.5 TWA-hours | **Cohort-relative**: mean percentile rank among that day's workers |
 
@@ -377,15 +377,34 @@ component's absolute and percentage contribution is stored (the percentages sum 
 - **Monotonic by construction, and tested.** Raising any single exposure input,
   with the others and the cohort held fixed, never lowers any component or the
   index (`test_index_is_monotonic_in_each_input_with_the_others_fixed`).
-- **Saturation.** On this dataset most worker-days exceed 100% NIOSH dose, so the
-  hearing component is often at its 100 cap. That reflects the exposure
-  honestly; it is not a modelling defect.
+- **Hearing uses L_EX,8h, not dose % (risk-1.1).** decibels are already logarithmic
+  in acoustic energy, and L_EX,8h is the standards' own unit, so the choice is
+  citable rather than an invented transform. Dose % under both criteria is stored
+  and shown beside the index everywhere: **the index ranks; the dose is the
+  regulated quantity.**
 
-**What the cap costs (7-day data).** Across the 140 worker-days the index runs from
-14.2 to 100 (median 83.5), with bands High 119, Medium 7, Low 14. Because hearing
-saturates at 100% dose, the index **cannot tell 2× the limit from 34×**. On
-2026-10-26, W102 (carding, 235% NIOSH) scores 98.2 and ranks *above* W105 (weaving,
-3,378%), because both hearing components sit at the cap and carding is the
-dustiest zone. The dose itself is always shown next to the index, and it is the
-figure to use for noise. A log-scaled hearing component would remove this
-ceiling; it is left as a documented design option rather than changed silently.
+**History: why risk-1.0 was replaced.** risk-1.0 mapped dose % to the hearing
+component, with 100% dose → 100 and a cap. That rule was an error in the
+specification: it saturated above the limit, so it could not tell a 235% dose from a
+3,378% one. On 2026-10-26 it ranked W102 (carding, 235% NIOSH) above W105 (weaving,
+3,378%) with both hearing components at 100. The regression test
+`test_regression_higher_l_ex_never_scores_below_lower_l_ex` now asserts that, with
+other components equal, a materially higher L_EX,8h never scores lower.
+
+**Distribution after the fix (7 days, 140 worker-days, risk-1.1):** High **110**,
+Medium **16**, Low **14** (risk-1.0: 119 / 7 / 14). The index runs from 11.0 to 82.2
+(median 71.7). The rating stays mostly High, and that is a finding rather than a
+calibration fault: this is a loud mill. It is consistent with the Erode power-loom
+study cited in the project brief, which found 88.5% of weaving-section workers above
+95 dBA *(full reference to be added from the project literature review)*.
+
+**The hearing component now separates the two workers, and the overall order is a
+multi-hazard result.** On 2026-10-26, W105's hearing component is **84.2** against
+W102's **46.1** (L_EX,8h 100.4 vs 88.7 dBA). W102 still scores higher overall (80.3 vs
+73.1), but now for a different reason: W102 works in carding, the dustiest zone
+(respiratory rank 94.7 against 35.1), and both workers have heat at the top of its
+scale. With equal weights, severe dust plus a 235% noise dose outranks extreme noise
+with little dust. The weights were not re-tuned to change this, because that would
+be fitting the index to a preferred answer. Anyone who weights hearing more heavily
+can change `risk_index.weights` in `config.yaml` (the weight-direction test covers
+this).

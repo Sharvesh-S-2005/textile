@@ -8,10 +8,13 @@ calculation, not a prediction) and is labelled `deterministic_index`, not
 
 Components, each 0-100, from values the exposure engine already computed:
 
-* Hearing: dose as a % of the daily allowance, the HIGHER of the NIOSH and India
-  figures (conservative), blended from today's dose and the 7-day mean daily dose,
-  capped at `cap_dose_pct`. So 100% dose -> 100. Above 100% the component saturates,
-  which is honest: there is no higher than "over the limit" on this scale.
+* Hearing: L_EX,8h (ISO 9612), blended from today's value and the 7-day energy-mean
+  daily value, mapped linearly from `l_ex_floor_db` (-> 0) to `l_ex_ceiling_db`
+  (-> 100), clamped at both ends. dB is already logarithmic in acoustic energy, so
+  this needs no ad-hoc transform, and it is the unit the standards use. (risk-1.0
+  used dose % capped at 100%; it saturated and could not tell 235% from 3,378%.)
+  The dose under both criteria is always reported beside the index: the index
+  ranks, the dose is the regulated quantity.
 * Heat: mean of two linear ramps relative to the ISO 7243 reference value:
   WBGT max (0 at limit-2 C, 100 at limit+6 C) and hours above the limit
   (0 at 0 h, 100 at `hours_above_full_h`).
@@ -32,6 +35,7 @@ index (CLAUDE.md).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -81,12 +85,17 @@ def _ramp(x: float, lo: float, hi: float) -> float:
     return 100.0 * (x - lo) / (hi - lo)
 
 
-def hearing_component(daily_dose_pct: float, mean_daily_dose_7d_pct: float, p: RiskParams) -> float:
-    """Blend of today's and the 7-day mean daily dose (% of allowance), capped; 100% -> 100."""
+def hearing_component(l_ex_8h_db: float, mean_daily_l_ex_7d_db: float, p: RiskParams) -> float:
+    """Blend of today's and the 7-day energy-mean L_EX,8h, mapped floor..ceiling -> 0..100.
+
+    The two levels are blended after mapping (each ramp value is linear in dB); the
+    map is clamped at both ends.
+    """
     h = p.hearing
-    blended = h["daily_weight"] * daily_dose_pct + h["cumulative_weight"] * mean_daily_dose_7d_pct
-    blended /= h["daily_weight"] + h["cumulative_weight"]
-    return min(max(blended, 0.0), h["cap_dose_pct"]) * 100.0 / h["cap_dose_pct"]
+    lo, hi = h["l_ex_floor_db"], h["l_ex_ceiling_db"]
+    blended = (h["daily_weight"] * _ramp(l_ex_8h_db, lo, hi)
+               + h["cumulative_weight"] * _ramp(mean_daily_l_ex_7d_db, lo, hi))
+    return blended / (h["daily_weight"] + h["cumulative_weight"])
 
 
 def heat_component(wbgt_max_c: float | None, hours_above: float | None, p: RiskParams) -> float:
@@ -133,13 +142,14 @@ def combine(components: dict[str, float], p: RiskParams) -> tuple[float, dict[st
 def compute_index(worker: dict[str, Any], cohort: dict[str, list[float]], p: RiskParams) -> dict[str, Any]:
     """Risk index for one worker-day.
 
-    `worker` holds: worker_id, date, dose_pct (max of criteria, today), dose_criterion,
-    mean_daily_dose_7d_pct, wbgt_max_c, wbgt_hours_above, the respiratory metric values,
+    `worker` holds: worker_id, date, l_ex_8h_db (today), mean_daily_l_ex_7d_db,
+    dose_niosh_pct, dose_india_pct (shown beside the index, not inputs),
+    wbgt_max_c, wbgt_hours_above, the respiratory metric values,
     data_coverage_pct, unaccounted_pct, ppe_status. `cohort` maps each respiratory
     metric to the same-day values of every worker (including this one).
     """
     comps = {
-        "hearing": hearing_component(worker["dose_pct"], worker["mean_daily_dose_7d_pct"], p),
+        "hearing": hearing_component(worker["l_ex_8h_db"], worker["mean_daily_l_ex_7d_db"], p),
         "heat": heat_component(worker["wbgt_max_c"], worker["wbgt_hours_above"], p),
         "respiratory": respiratory_component({m: worker.get(m) for m in p.respiratory_metrics}, cohort),
     }
@@ -148,7 +158,8 @@ def compute_index(worker: dict[str, Any], cohort: dict[str, list[float]], p: Ris
     confidence = coverage * (1.0 - worker["unaccounted_pct"] / 100.0)
     insufficient = confidence < p.min_confidence_pct
     describe = {
-        "hearing": f"noise dose {worker['dose_pct']:,.0f}% of the daily allowance ({worker['dose_criterion']})",
+        "hearing": (f"noise L_EX,8h {worker['l_ex_8h_db']:.1f} dBA (dose {worker['dose_niosh_pct']:,.0f}% NIOSH, "
+                    f"{worker['dose_india_pct']:,.0f}% India)"),
         "heat": ("heat: WBGT max {:.1f} C, {:.1f} h above the {:.0f} C reference (approximate)".format(
             worker["wbgt_max_c"] or 0.0, worker["wbgt_hours_above"] or 0.0, p.wbgt_limit_c)),
         "respiratory": "dust higher than {:.0f}% of co-workers today (cohort-relative, indicative)".format(
@@ -161,6 +172,8 @@ def compute_index(worker: dict[str, Any], cohort: dict[str, list[float]], p: Ris
         "band": "insufficient data" if insufficient else band_for(overall, p),
         "insufficient_data": insufficient, "components": comps, "contributions": contributions,
         "drivers": drivers, "confidence_pct": confidence, "ppe_status": worker.get("ppe_status") or {},
+        "l_ex_8h_db": worker["l_ex_8h_db"], "dose_niosh_pct": worker["dose_niosh_pct"],
+        "dose_india_pct": worker["dose_india_pct"],
         "label": LABEL, "weights": p.weights, "version": p.version, "params": {**p.as_dict(), "caveat": CAVEAT},
     }
 
@@ -178,9 +191,9 @@ def worker_day_inputs(shift_rows: list[dict[str, Any]], cumulative_7d: dict[str,
             continue
         niosh = sum(r["dose_niosh_pct"] for r in valid)
         india = sum(r["dose_india_pct"] for r in valid)
+        # Daily L_EX,8h of several sessions combines on an energy basis.
+        lex = 10.0 * math.log10(sum(10.0 ** (r["l_ex_8h_db"] / 10.0) for r in valid))
         cum = cumulative_7d.get(wid, {})
-        days = cum.get("days_worked") or 0
-        cum_dose = max(cum.get("cumulative_dose_niosh_pct") or 0.0, cum.get("cumulative_dose_india_pct") or 0.0)
         acc = sum(r["accounted_time_s"] for r in valid)
         sess = sum(r["session_duration_s"] for r in valid)
         cov = sum((r["data_coverage_pct"] or 0.0) * r["accounted_time_s"] for r in valid) / acc if acc else None
@@ -193,8 +206,8 @@ def worker_day_inputs(shift_rows: list[dict[str, Any]], cumulative_7d: dict[str,
             return sum(v * t for v, t in pairs) / w if w else None
 
         out.append({"worker_id": wid, "date": rows[0]["shift_date"],
-                    "dose_pct": max(niosh, india), "dose_criterion": "NIOSH" if niosh >= india else "India",
-                    "mean_daily_dose_7d_pct": cum_dose / days if days else max(niosh, india),
+                    "l_ex_8h_db": lex, "dose_niosh_pct": niosh, "dose_india_pct": india,
+                    "mean_daily_l_ex_7d_db": cum.get("mean_daily_l_ex_8h_db") or lex,
                     "wbgt_max_c": max(wbgt) if wbgt else None,
                     "wbgt_hours_above": sum(above) / 3600.0 if above else None,
                     "pm25_twa_raw": twa("pm25_twa_raw"), "pm10_twa_raw": twa("pm10_twa_raw"),

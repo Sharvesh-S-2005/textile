@@ -433,18 +433,20 @@ ingest:
 # exposure/risk_index.py - deterministic, transparent risk index (no training, no model).
 # THE WEIGHTS AND RAMPS ARE A DESIGN CHOICE OF THIS PROJECT, NOT A VALIDATED CLINICAL MODEL.
 risk_index:
-  version: "risk-1.0"
+  version: "risk-1.1"             # 1.1: hearing from L_EX,8h (1.0 used dose %, which saturated)
   weights: {hearing: 1.0, heat: 1.0, respiratory: 1.0}   # equal by default; normalised to sum 1
   bands: {low_max: 33.0, medium_max: 66.0}               # Low < 33 <= Medium < 66 <= High
   # confidence = data_coverage_pct * (1 - unaccounted_pct/100). Below this the band is
   # suppressed ("insufficient data"); the number is still shown.
   min_confidence_pct: 80.0
   hearing:
-    # Dose as % of the daily allowance, the HIGHER of NIOSH and India (conservative).
-    # 100% dose maps to 100; above 100% the component is capped (saturates).
-    daily_weight: 0.5             # today's dose
-    cumulative_weight: 0.5        # 7-day mean daily dose (cumulative / days worked)
-    cap_dose_pct: 100.0
+    # Input is L_EX,8h (ISO 9612), the standards' own unit: already logarithmic in
+    # acoustic energy, so no ad-hoc transform. Linear map, clamped at both ends.
+    # (risk-1.0 used dose % capped at 100%, which could not tell 235% from 3,378%.)
+    l_ex_floor_db: 75.0           # -> 0
+    l_ex_ceiling_db: 105.0        # -> 100
+    daily_weight: 0.5             # today's L_EX,8h
+    cumulative_weight: 0.5        # 7-day energy-mean daily L_EX,8h
   heat:
     # Piecewise linear ramps relative to the ISO 7243 reference value (28 C, moderate work):
     # WBGT max: 0 at (limit - 2 C), 100 at (limit + 6 C). Time above: 0 at 0 h, 100 at 4 h.

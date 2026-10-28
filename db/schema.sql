@@ -364,6 +364,9 @@ CREATE TABLE IF NOT EXISTS worker_risk_index (
     drivers             TEXT NOT NULL,   -- JSON: top two factors in plain language
     confidence_pct      REAL NOT NULL,
     ppe_status          TEXT NOT NULL,   -- JSON: displayed alongside, never reduces the index
+    l_ex_8h_db          REAL,            -- hearing input (risk-1.1)
+    dose_niosh_pct      REAL,            -- the regulated quantities, shown beside the index
+    dose_india_pct      REAL,
     label               TEXT NOT NULL CHECK (label = 'deterministic_index'),
     weights             TEXT NOT NULL,
     version             TEXT NOT NULL,
