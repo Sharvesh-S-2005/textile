@@ -29,3 +29,14 @@ def test_each_record_is_rejected_for_its_stated_reason() -> None:
 def test_every_record_carries_the_marker() -> None:
     for _, _, raw in build_records(REF):
         assert MARKER.encode() in raw
+
+
+def test_future_record_stays_rejected_even_if_the_stream_moves_on() -> None:
+    """Regression: at --speed 100 the stream advances while the injector runs, so the
+    future record must remain rejected long after the reference it was built from."""
+    from datetime import timedelta
+
+    (_, topic, raw), = [r for r in build_records(REF) if r[0] == Reason.FUTURE_TS]
+    later = REF + timedelta(hours=8)                  # a whole shift later
+    verdict = validate(topic, json.loads(raw), later)
+    assert not verdict.accepted and verdict.reason == Reason.FUTURE_TS

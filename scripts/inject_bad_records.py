@@ -11,8 +11,12 @@ This is deliberately not part of simulator/: the simulator only ever produces
 contract-valid data (plus realistic sensor failures), and stays that way.
 
 The future-ts record is built relative to the live stream: the script first reads
-the newest `ts` on textile/zone/+/env, so "11 minutes in the future" is relative
-to the run, not to the wall clock.
+the newest `ts` on textile/zone/+/env, then dates the record a full day ahead of
+it. (A margin of just over the 10-minute tolerance is NOT safe: at --speed 100 the
+stream advances ~100 simulated seconds per wall second while the script runs, so
+the record could arrive inside the tolerance, be accepted as a fake reading, and
+displace the real reading with that ts as a "duplicate". The exact boundary is
+covered by the unit tests instead.)
 """
 
 from __future__ import annotations
@@ -74,7 +78,7 @@ def build_records(reference: datetime) -> list[tuple[Reason, str, bytes]]:
     def enc(p: Any) -> bytes:
         return json.dumps(p).encode()
 
-    future = reference + timedelta(seconds=tolerance + 60)
+    future = reference + timedelta(days=1) + timedelta(seconds=tolerance)   # see module docstring
     return [
         (Reason.MALFORMED_JSON, env_topic, f'{{"schema_version": "{schema}", "injected_by": "{MARKER}"'.encode()),
         (Reason.UNKNOWN_TOPIC, f"{prefix}/zone/Z9/env", enc(variant(zone_id="Z9"))),
