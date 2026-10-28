@@ -77,3 +77,20 @@ def test_missing_section_raises(tmp_path: Path) -> None:
     bad.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     with pytest.raises(config.ConfigError, match="workers"):
         config.load_config(bad)
+
+
+def test_adjacency_is_symmetric_and_covers_all_zones() -> None:
+    adjacency = config.get_adjacency()
+    zone_ids = {z["zone_id"] for z in config.get_zones()}
+    assert set(adjacency) == zone_ids
+    for zone, neighbours in adjacency.items():
+        for n in neighbours:
+            assert n in zone_ids
+            assert zone in adjacency[n], (zone, n)
+
+
+def test_high_exposure_workers_exist() -> None:
+    ids = {w["worker_id"] for w in config.get_workers()}
+    dyn = config.get_simulation_config()["worker_dynamics"]
+    assert set(dyn["high_exposure_workers"]) <= ids
+    assert dyn["break_zone"] in {z["zone_id"] for z in config.get_zones()}

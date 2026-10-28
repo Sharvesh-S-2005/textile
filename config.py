@@ -20,7 +20,7 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
     "simulation": [
         "schema_version", "env_interval_s", "ble_interval_s", "machine_interval_s",
         "speed_factor", "random_seed", "firmware_tag", "zone_dynamics",
-        "machine_dynamics",
+        "machine_dynamics", "worker_dynamics",
     ],
     "shifts": ["timezone", "definitions"],
     "exposure_limits": [
@@ -31,6 +31,8 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
         "stuck_value_count", "future_ts_tolerance_s", "late_upload_threshold_s",
     ],
     "paths": ["db_path", "model_dir", "log_dir"],
+    "devices": ["gate", "ppe_app"],
+    "layout": ["adjacency"],
 }
 _REQUIRED_LIST_ITEMS: dict[str, list[str]] = {
     "zones": ["zone_id", "name", "device_id", "profile"],
@@ -155,6 +157,16 @@ def get_exposure_limits() -> dict[str, Any]:
 def get_validation_config() -> dict[str, Any]:
     """Return the `validation` section (per-field ranges and spike thresholds)."""
     return get_config()["validation"]
+
+
+def get_devices() -> dict[str, Any]:
+    """Return the `devices` section (gate reader and supervisor PPE app IDs)."""
+    return get_config()["devices"]
+
+
+def get_adjacency() -> dict[str, list[str]]:
+    """Return the zone adjacency map from the `layout` section."""
+    return get_config()["layout"]["adjacency"]
 
 
 def get_paths() -> dict[str, Any]:

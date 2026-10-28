@@ -70,6 +70,43 @@ simulation:
       ratio_at_30_days: 2.5        # vib_rms multiplier after 30 simulated days
       initial_days: 0              # wear already accumulated at simulation start
 
+  # Parameters for simulator/worker_model.py.
+  worker_dynamics:
+    check_in_before_min: {min: 3, max: 15}
+    check_out_after_min: {min: 2, max: 10}
+    home_dwell_mean_min: 45        # exponential dwell in home zone before a short trip
+    away_dwell_min: {min: 3, max: 12}
+    break_zone: Z7                 # breaks, pre-shift and post-shift time
+    overtime: {probability: 0.1, duration_min: {min: 30, max: 120}}
+    # Deliberate high-exposure case for the dashboard: long overtime, rarely leaves
+    # the home zone, skips tea breaks.
+    high_exposure_workers: [W105]
+    high_exposure:
+      overtime_min: {min: 120, max: 180}
+      home_dwell_mean_min: 240
+      skips_tea_breaks: true
+    ppe:
+      partial_share_of_noncompliance: 0.5   # rest of the non-compliant share is not_worn
+      unknown_probability: 0.02
+      record_delay_min: {min: 5, max: 30}   # supervisor round after shift start
+    supervisors: {A: SUP-01, B: SUP-02, C: SUP-03}
+
+# Physical devices that are not zone or machine nodes.
+devices:
+  gate: {device_id: GW-01, gate_id: GATE-A}
+  ppe_app: {device_id: SUP-APP}
+
+# Mill floor layout, process-flow order. Used for worker movement and BLE leakage.
+layout:
+  adjacency:
+    Z1: [Z2]
+    Z2: [Z1, Z3]
+    Z3: [Z2, Z4]
+    Z4: [Z3, Z5]
+    Z5: [Z4, Z6]
+    Z6: [Z5, Z7]
+    Z7: [Z6]
+
 # Profile values describe the zone with all its machines running.
 # mean +/- 2*sd spans the range in the CLAUDE.md zone table (~95% of samples).
 # PM10 is set to ~2x PM2.5 because cotton dust is dominated by coarse particles.
