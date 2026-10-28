@@ -142,9 +142,24 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
 class Repo:
     """A connection to the project database and every query the project runs."""
 
-    def __init__(self, db_path: Path | str) -> None:
-        """Open (creating if needed) the database file and apply connection settings."""
+    def __init__(self, db_path: Path | str, read_only: bool = False) -> None:
+        """Open (creating if needed) the database file and apply connection settings.
+
+        read_only=True opens an existing file with a `mode=ro` URI: every write is
+        refused by SQLite itself (used by the dashboard, so it cannot damage a run).
+        WAL is already set on the file by the writer, so a read-only connection can
+        read while ingest writes.
+        """
         self.db_path = Path(db_path)
+        self.read_only = read_only
+        if read_only:
+            if not self.db_path.is_file():
+                raise FileNotFoundError(f"database not found: {self.db_path}")
+            uri = f"file:{self.db_path.resolve().as_posix()}?mode=ro"
+            self._conn = sqlite3.connect(uri, uri=True, timeout=BUSY_TIMEOUT_MS / 1000, check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            return
         if str(db_path) != ":memory:":
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), timeout=BUSY_TIMEOUT_MS / 1000)

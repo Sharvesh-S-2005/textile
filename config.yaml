@@ -460,6 +460,14 @@ risk_index:
     # anchor exists for optical PM). Ranks workers against each other, NOT a health threshold.
     metrics: [pm25_twa_raw, pm10_twa_raw, pm25_twa_hours_raw_7d]
 
+# dashboard/ - Streamlit, reads SQLite through db/repo.py only (read-only connection).
+dashboard:
+  default_db: data/week/textile_ohs.db   # overridden by --db or the OHS_DB environment variable
+  cache_ttl_s: 10                        # every read is cached this long (widget reruns stay fast)
+  # One colour per risk band, same order everywhere; always shown with the band's name.
+  band_colours: {Low: "#9E9E9E", Medium: "#CC79A7", High: "#6A3D9A", "insufficient data": "#FFFFFF"}
+  default_worker: highest_index          # open the drilldown on the highest-index worker
+
 # ml/ - hazard forecasting (Task A). Built only from stored tables via db/repo.py.
 ml:
   bin_s: 60                        # 10 s telemetry resampled to 1-minute bins

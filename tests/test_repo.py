@@ -350,3 +350,19 @@ def test_migration_backfills_a_day2_database(tmp_path: Path) -> None:
         assert r.get_zone_env("Z1", "2026-10-28T00:00:00Z", "2026-10-28T01:00:00Z")[0]["ts"] == "2026-10-28T00:00:09Z"
         r.init_schema()                                  # re-running is a no-op
         assert r.table_counts()["zone_env"] == 4
+
+
+def test_read_only_connection_reads_but_refuses_writes(tmp_path: Path) -> None:
+    import sqlite3
+
+    db = tmp_path / "ro.db"
+    with Repo(db) as w:
+        w.init_schema()
+        w.insert_zone_env("textile/zone/Z1/env", _env("2026-10-28T00:30:00Z"), RX, [])
+    ro = Repo(db, read_only=True)
+    assert ro.table_counts()["zone_env"] == 1
+    with pytest.raises(sqlite3.OperationalError):
+        ro.insert_zone_env("textile/zone/Z1/env", _env("2026-10-28T00:30:10Z"), RX, [])
+    ro.close()
+    with pytest.raises(FileNotFoundError):
+        Repo(tmp_path / "missing.db", read_only=True)

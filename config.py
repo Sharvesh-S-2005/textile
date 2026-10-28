@@ -31,6 +31,7 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
         "stuck_value_count", "future_ts_tolerance_s", "late_upload_threshold_s",
     ],
     "paths": ["db_path", "model_dir", "log_dir", "figures_dir"],
+    "dashboard": ["default_db", "cache_ttl_s", "band_colours", "default_worker"],
     "risk_index": ["version", "weights", "bands", "min_confidence_pct", "hearing", "heat", "respiratory"],
     "ml": [
         "bin_s", "lags_min", "rolling_min", "roc_min", "env_rolling_min", "horizons_min", "targets",
@@ -212,6 +213,11 @@ def get_ingest_config() -> dict[str, Any]:
 def get_risk_index_config() -> dict[str, Any]:
     """Return the `risk_index` section (weights, bands, ramps; a design choice)."""
     return get_config()["risk_index"]
+
+
+def get_dashboard_config() -> dict[str, Any]:
+    """Return the `dashboard` section."""
+    return get_config()["dashboard"]
 
 
 def get_ml_config() -> dict[str, Any]:
