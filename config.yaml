@@ -1,0 +1,245 @@
+# Single source of truth for zones, workers, machines, limits and thresholds.
+# No module may hard-code any value that lives here.
+
+mqtt:
+  host: localhost
+  port: 1883
+  keepalive_s: 60
+  qos: 1
+  topic_prefix: textile
+  client_id_prefix: sim
+
+simulation:
+  schema_version: "1.0"
+  env_interval_s: 10
+  ble_interval_s: 30
+  machine_interval_s: 10
+  speed_factor: 1.0
+  random_seed: 42
+  firmware_tag: "sim-0.1.0"
+
+  # Parameters for simulator/profiles.py (zone hazard model).
+  zone_dynamics:
+    # Level a zone falls to with all machines stopped (ventilation, people, traffic).
+    background_noise_dba: {mean: 60.0, sd: 2.0}
+    # PM decays toward this fraction of the zone mean with all machines stopped.
+    pm_floor_fraction: 0.12
+    pm10_ratio_log_sd: 0.08
+    outdoor_co2_ppm: 420
+    # Ornstein-Uhlenbeck relaxation time constants (seconds) per quantity.
+    tau_s: {noise: 30, pm: 600, temp: 1800, rh: 1800, co2: 3600, globe: 300}
+    diurnal:
+      temp_amplitude_c: 2.0
+      temp_peak_hour_local: 15     # hottest mid-afternoon; RH peaks 12 h later
+      rh_amplitude_pct: 6.0
+      machine_heat_c: 1.0          # extra air temp with all machines running
+      globe_idle_fraction: 0.3     # share of globe_offset_c present with machines off
+      # The diurnal curve carries part of the profile sd; the random walk carries this share.
+      residual_sd_fraction: 0.5
+      globe_sd_c: 0.3
+    noise_crest_db: {min: 3.0, mean_extra: 3.0}   # noise_peak - noise_dba
+    transients:
+      noise_rate_per_h: 6          # loom starts, shuttle knocks, blowdowns
+      noise_boost_db: {min: 4.0, max: 10.0}
+      noise_peak_boost_db: {min: 8.0, max: 18.0}
+      noise_duration_readings: {min: 1, max: 3}
+      dust_rate_per_h: 0.8         # cleaning / blowdown cycles
+      dust_impulse_x_mean: {min: 1.0, max: 2.5}
+    sensor_faults:
+      rate_per_sensor_per_h: 0.02
+      duration_min: {min: 2, max: 10}
+      kinds: [stale, error]
+    pm_drift:
+      gain_per_day: 0.015          # optical PM sensor reads high as lint builds up
+      needs_clean_gain: 1.25
+      clean_after_h: 8             # time for maintenance to clean once flagged
+      initial_days_since_clean_max: 15
+
+# Profile values describe the zone with all its machines running.
+# mean +/- 2*sd spans the range in the CLAUDE.md zone table (~95% of samples).
+# PM10 is set to ~2x PM2.5 because cotton dust is dominated by coarse particles.
+zones:
+  - zone_id: Z1
+    name: Blowroom
+    device_id: ZN-Z1
+    profile:
+      noise_dba:   {mean: 91.5,  sd: 1.75}   # 88-95
+      pm25_ugm3:   {mean: 275.0, sd: 62.5}   # 150-400
+      pm10_ugm3:   {mean: 550.0, sd: 125.0}
+      temp_c:      {mean: 33.0,  sd: 2.0}
+      rh_pct:      {mean: 65.0,  sd: 5.0}
+      co2_ppm:     {mean: 750.0, sd: 100.0}
+      globe_offset_c: 2.5
+  - zone_id: Z2
+    name: Carding
+    device_id: ZN-Z2
+    profile:
+      noise_dba:   {mean: 88.5,  sd: 1.75}   # 85-92
+      pm25_ugm3:   {mean: 350.0, sd: 75.0}   # 200-500
+      pm10_ugm3:   {mean: 700.0, sd: 150.0}
+      temp_c:      {mean: 34.0,  sd: 2.0}
+      rh_pct:      {mean: 62.0,  sd: 5.0}
+      co2_ppm:     {mean: 800.0, sd: 100.0}
+      globe_offset_c: 3.0
+  - zone_id: Z3
+    name: Drawing/Combing
+    device_id: ZN-Z3
+    profile:
+      noise_dba:   {mean: 85.0,  sd: 1.5}    # 82-88
+      pm25_ugm3:   {mean: 140.0, sd: 30.0}   # 80-200
+      pm10_ugm3:   {mean: 280.0, sd: 60.0}
+      temp_c:      {mean: 32.0,  sd: 2.0}
+      rh_pct:      {mean: 63.0,  sd: 5.0}
+      co2_ppm:     {mean: 800.0, sd: 100.0}
+      globe_offset_c: 2.0
+  - zone_id: Z4
+    name: Ring Spinning
+    device_id: ZN-Z4
+    profile:
+      noise_dba:   {mean: 95.5,  sd: 1.75}   # 92-99
+      pm25_ugm3:   {mean: 105.0, sd: 22.5}   # 60-150
+      pm10_ugm3:   {mean: 210.0, sd: 45.0}
+      temp_c:      {mean: 33.5,  sd: 2.0}
+      rh_pct:      {mean: 75.0,  sd: 4.0}    # high RH for yarn quality
+      co2_ppm:     {mean: 900.0, sd: 120.0}
+      globe_offset_c: 2.5
+  - zone_id: Z5
+    name: Weaving/Power Loom
+    device_id: ZN-Z5
+    profile:
+      noise_dba:   {mean: 98.5,  sd: 1.75}   # 95-102
+      pm25_ugm3:   {mean: 85.0,  sd: 17.5}   # 50-120
+      pm10_ugm3:   {mean: 170.0, sd: 35.0}
+      temp_c:      {mean: 33.0,  sd: 2.0}
+      rh_pct:      {mean: 70.0,  sd: 5.0}
+      co2_ppm:     {mean: 950.0, sd: 120.0}
+      globe_offset_c: 3.0
+  - zone_id: Z6
+    name: Winding/Packing
+    device_id: ZN-Z6
+    profile:
+      noise_dba:   {mean: 87.5,  sd: 1.25}   # 85-90
+      pm25_ugm3:   {mean: 70.0,  sd: 15.0}   # 40-100
+      pm10_ugm3:   {mean: 140.0, sd: 30.0}
+      temp_c:      {mean: 31.0,  sd: 2.0}
+      rh_pct:      {mean: 62.0,  sd: 5.0}
+      co2_ppm:     {mean: 800.0, sd: 100.0}
+      globe_offset_c: 1.5
+  - zone_id: Z7
+    name: Office/Store
+    device_id: ZN-Z7
+    profile:
+      noise_dba:   {mean: 55.0,  sd: 2.5}    # 50-60
+      pm25_ugm3:   {mean: 20.0,  sd: 5.0}    # 10-30
+      pm10_ugm3:   {mean: 35.0,  sd: 8.0}
+      temp_c:      {mean: 28.0,  sd: 1.5}
+      rh_pct:      {mean: 55.0,  sd: 5.0}
+      co2_ppm:     {mean: 700.0, sd: 100.0}
+      globe_offset_c: 0.5
+
+machines:
+  - {machine_id: M1, zone_id: Z1, device_id: MN-M1, rated_current_a: 32.0, baseline_vib_rms_g: 0.45, degrading: false}
+  - {machine_id: M2, zone_id: Z2, device_id: MN-M2, rated_current_a: 24.0, baseline_vib_rms_g: 0.35, degrading: false}
+  - {machine_id: M3, zone_id: Z4, device_id: MN-M3, rated_current_a: 15.0, baseline_vib_rms_g: 0.40, degrading: false}
+  - {machine_id: M4, zone_id: Z3, device_id: MN-M4, rated_current_a: 12.0, baseline_vib_rms_g: 0.30, degrading: false}
+  - {machine_id: M5, zone_id: Z5, device_id: MN-M5, rated_current_a: 18.0, baseline_vib_rms_g: 0.50, degrading: true}
+  - {machine_id: M6, zone_id: Z5, device_id: MN-M6, rated_current_a: 18.0, baseline_vib_rms_g: 0.50, degrading: false}
+  - {machine_id: M7, zone_id: Z4, device_id: MN-M7, rated_current_a: 15.0, baseline_vib_rms_g: 0.40, degrading: false}
+  - {machine_id: M8, zone_id: Z6, device_id: MN-M8, rated_current_a: 10.0, baseline_vib_rms_g: 0.25, degrading: false}
+
+# Names are generic placeholders, never real people.
+workers:
+  - {worker_id: W101, name: Worker 101, tag_id: BLE-0001, card_id: RFID-10001, home_zone: Z1, shift: A, ppe_compliance: 0.85}
+  - {worker_id: W102, name: Worker 102, tag_id: BLE-0002, card_id: RFID-10002, home_zone: Z2, shift: A, ppe_compliance: 0.70}
+  - {worker_id: W103, name: Worker 103, tag_id: BLE-0003, card_id: RFID-10003, home_zone: Z3, shift: A, ppe_compliance: 0.90}
+  - {worker_id: W104, name: Worker 104, tag_id: BLE-0004, card_id: RFID-10004, home_zone: Z4, shift: A, ppe_compliance: 0.60}
+  - {worker_id: W105, name: Worker 105, tag_id: BLE-0005, card_id: RFID-10005, home_zone: Z5, shift: A, ppe_compliance: 0.30}
+  - {worker_id: W106, name: Worker 106, tag_id: BLE-0006, card_id: RFID-10006, home_zone: Z5, shift: A, ppe_compliance: 0.80}
+  - {worker_id: W107, name: Worker 107, tag_id: BLE-0007, card_id: RFID-10007, home_zone: Z4, shift: A, ppe_compliance: 0.75}
+  - {worker_id: W108, name: Worker 108, tag_id: BLE-0008, card_id: RFID-10008, home_zone: Z7, shift: A, ppe_compliance: 0.95}
+  - {worker_id: W109, name: Worker 109, tag_id: BLE-0009, card_id: RFID-10009, home_zone: Z1, shift: B, ppe_compliance: 0.65}
+  - {worker_id: W110, name: Worker 110, tag_id: BLE-0010, card_id: RFID-10010, home_zone: Z2, shift: B, ppe_compliance: 0.80}
+  - {worker_id: W111, name: Worker 111, tag_id: BLE-0011, card_id: RFID-10011, home_zone: Z4, shift: B, ppe_compliance: 0.55}
+  - {worker_id: W112, name: Worker 112, tag_id: BLE-0012, card_id: RFID-10012, home_zone: Z5, shift: B, ppe_compliance: 0.70}
+  - {worker_id: W113, name: Worker 113, tag_id: BLE-0013, card_id: RFID-10013, home_zone: Z6, shift: B, ppe_compliance: 0.90}
+  - {worker_id: W114, name: Worker 114, tag_id: BLE-0014, card_id: RFID-10014, home_zone: Z3, shift: B, ppe_compliance: 0.85}
+  - {worker_id: W115, name: Worker 115, tag_id: BLE-0015, card_id: RFID-10015, home_zone: Z7, shift: B, ppe_compliance: 0.95}
+  - {worker_id: W116, name: Worker 116, tag_id: BLE-0016, card_id: RFID-10016, home_zone: Z1, shift: C, ppe_compliance: 0.75}
+  - {worker_id: W117, name: Worker 117, tag_id: BLE-0017, card_id: RFID-10017, home_zone: Z4, shift: C, ppe_compliance: 0.60}
+  - {worker_id: W118, name: Worker 118, tag_id: BLE-0018, card_id: RFID-10018, home_zone: Z5, shift: C, ppe_compliance: 0.50}
+  - {worker_id: W119, name: Worker 119, tag_id: BLE-0019, card_id: RFID-10019, home_zone: Z6, shift: C, ppe_compliance: 0.85}
+  - {worker_id: W120, name: Worker 120, tag_id: BLE-0020, card_id: RFID-10020, home_zone: Z2, shift: C, ppe_compliance: 0.70}
+
+# Local times in Asia/Kolkata. C shift crosses midnight.
+shifts:
+  timezone: Asia/Kolkata
+  definitions:
+    - shift_id: A
+      start: "06:00"
+      end: "14:00"
+      breaks:
+        - {kind: tea,   start: "08:00", duration_min: 10}
+        - {kind: lunch, start: "10:00", duration_min: 30}
+        - {kind: tea,   start: "12:00", duration_min: 10}
+    - shift_id: B
+      start: "14:00"
+      end: "22:00"
+      breaks:
+        - {kind: tea,   start: "16:00", duration_min: 10}
+        - {kind: lunch, start: "18:00", duration_min: 30}
+        - {kind: tea,   start: "20:00", duration_min: 10}
+    - shift_id: C
+      start: "22:00"
+      end: "06:00"
+      breaks:
+        - {kind: tea,   start: "00:00", duration_min: 10}
+        - {kind: lunch, start: "02:00", duration_min: 30}
+        - {kind: tea,   start: "04:00", duration_min: 10}
+
+exposure_limits:
+  criteria:
+    niosh:
+      criterion_db: 85
+      exchange_rate_db: 3
+      duration_h: 8
+    india:
+      criterion_db: 90
+      # VERIFY: exchange rate must be checked against the current Tamil Nadu
+      # Factories Rules before final submission.
+      exchange_rate_db: 5
+      duration_h: 8
+  # ISO 7243:2017 WBGT reference value, metabolic rate class 2 (moderate work),
+  # acclimatised worker. The assumption is stated wherever the value is shown.
+  wbgt_limit_c: 28.0
+  wbgt_work_category: moderate
+  rh_correction_threshold_pct: 75
+
+# Valid ranges match docs/data_contract.md sections 4-6.
+# spike_threshold = max plausible change between consecutive readings.
+validation:
+  fields:
+    noise_dba:       {min: 30.0,  max: 140.0,   spike_threshold: 25.0}
+    noise_peak_dba:  {min: 30.0,  max: 150.0,   spike_threshold: 35.0}
+    pm25_ugm3:       {min: 0.0,   max: 2000.0,  spike_threshold: 500.0}
+    pm10_ugm3:       {min: 0.0,   max: 3000.0,  spike_threshold: 800.0}
+    temp_c:          {min: -10.0, max: 70.0,    spike_threshold: 5.0}
+    rh_pct:          {min: 0.0,   max: 100.0,   spike_threshold: 15.0}
+    globe_temp_c:    {min: -10.0, max: 90.0,    spike_threshold: 8.0}
+    co2_ppm:         {min: 300,   max: 10000,   spike_threshold: 1500}
+    current_a:       {min: 0.0,   max: 200.0,   spike_threshold: 150.0}
+    vib_rms_g:       {min: 0.0,   max: 16.0,    spike_threshold: 5.0}
+    vib_peak_g:      {min: 0.0,   max: 16.0,    spike_threshold: 10.0}
+    scan_window_s:   {min: 5,     max: 120,     spike_threshold: 120}
+    rssi_dbm:        {min: -100,  max: -20,     spike_threshold: 80}
+    seen_count:      {min: 1,     max: 1000,    spike_threshold: 1000}
+  allowed_sensor_flags: [ok, stale, error, uncalibrated, needs_clean]
+  allowed_ppe_values: [worn, partial, not_worn, unknown]
+  allowed_rfid_events: [check_in, check_out]
+  stuck_value_count: 30
+  future_ts_tolerance_s: 600
+  late_upload_threshold_s: 7200
+
+paths:
+  db_path: data/textile_ohs.db
+  model_dir: models/
+  log_dir: logs/
