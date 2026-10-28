@@ -305,6 +305,7 @@ valid ranges are in sections 4–6.
 | `vib_rms_g` | 5 g | Far above any wear-driven change; catches a loose or dropped sensor |
 | `vib_peak_g` | 10 g | Peaks are wider than RMS |
 | `seen_count` | cap of 1000 (range maximum) | Tags advertise about once per second (~30 per 30 s window); 1000 leaves room for faster tags and longer windows while rejecting counter overflow |
+| `uptime_s`, `buffered_records` | range 0–4294967295, no spike check | Non-negative counters held as unsigned 32-bit on the node |
 
 Other constants: stuck-value detection compares against the previous **30**
 readings (`stuck_value_count`); the future-`ts` tolerance is **600 s**

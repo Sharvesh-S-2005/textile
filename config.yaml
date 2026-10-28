@@ -317,6 +317,10 @@ validation:
     scan_window_s:   {min: 5,     max: 120,     spike_threshold: 120}
     rssi_dbm:        {min: -100,  max: -20,     spike_threshold: 80}
     seen_count:      {min: 1,     max: 1000,    spike_threshold: 1000}
+    # Status counters (section 9): non-negative integers; max = unsigned 32-bit.
+    # Not history fields, so spike_threshold is never applied (set to the max).
+    uptime_s:         {min: 0,    max: 4294967295, spike_threshold: 4294967295}
+    buffered_records: {min: 0,    max: 4294967295, spike_threshold: 4294967295}
   allowed_sensor_flags: [ok, stale, error, uncalibrated, needs_clean]
   allowed_ppe_values: [worn, partial, not_worn, unknown]
   allowed_rfid_events: [check_in, check_out]
