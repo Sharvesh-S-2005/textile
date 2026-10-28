@@ -330,3 +330,19 @@ def test_commits_when_broker_inflight_window_is_full(tmp_path: Path) -> None:
     assert client.acked == list(range(1, 9))            # two windows of 4, acked after commit
     sub.shutdown()
     repo.close()
+
+
+def test_duplicates_advance_the_watermark_so_replays_still_reject_future_records(tmp_path: Path) -> None:
+    """Regression (Day 2 idempotency run): replaying already-stored data must not
+    leave the stream without a watermark."""
+    repo = Repo(tmp_path / "r.db")
+    repo.init_schema()
+    stream = [("textile/zone/Z4/env", json.dumps(env("2026-10-28T04:48:00Z")).encode()),
+              ("textile/zone/Z4/env", json.dumps(env("2026-10-29T04:48:00Z")).encode())]   # a day ahead
+    for _ in range(2):                                   # live pass, then replay of the same bytes
+        ingestor = Ingestor(repo, TimeReference("stream"), 500, 1.0)
+        outcomes = [ingestor.handle(Message(t, p, datetime.now(timezone.utc))) for t, p in stream]
+        ingestor.flush()
+        assert outcomes[1] in ("rejected", "rejected_duplicate")
+    assert repo.table_counts()["zone_env"] == 1
+    repo.close()

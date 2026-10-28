@@ -59,10 +59,13 @@ class TimeReference:
     """Supplies "now" for the future-ts and late-upload checks.
 
     wall:   the wall clock at receipt (real hardware).
-    stream: the newest `ts` among accepted, non-retained telemetry and event
-            messages (replays and accelerated simulation). Retained messages and
-            status messages never advance it, so a stale retained birth cannot make
-            live data look like it is from the future.
+    stream: the newest `ts` among accepted (new or duplicate), non-retained
+            telemetry and event messages (replays and accelerated simulation).
+            Retained messages and status messages never advance it, so a stale
+            retained birth cannot make live data look like it is from the future.
+            Limitation: until the first telemetry/event record is accepted there is
+            no watermark, so that first record is judged against its own ts. Stream
+            mode is for replays and simulation; real hardware uses `wall`.
     """
 
     def __init__(self, mode: str) -> None:
@@ -167,11 +170,15 @@ class Ingestor:
         if not verdict.accepted:
             return self._reject(msg, received_ts, Reason(verdict.reason), verdict.detail, device_id)
 
+        # A duplicate is still a valid record of the stream, so it advances the
+        # watermark. (Advancing only on new rows let a replay of already-stored data
+        # run with no watermark, and a far-future record was accepted - found by the
+        # Day 2 idempotency check.)
+        self.time_reference.advance(verdict.kind, payload, msg.retained)
         if not self._store(msg.topic, payload, received_ts, verdict):
             return "duplicate"
         for name, value in history_values(verdict.kind, payload).items():
             history[name].append(value)
-        self.time_reference.advance(verdict.kind, payload, msg.retained)
         self.accepted_by_kind[verdict.kind] += 1
         if verdict.flags:
             self.counts["flagged"] += 1
