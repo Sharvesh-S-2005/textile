@@ -206,7 +206,7 @@ def _captured_batch() -> list[tuple[str, dict]]:
     """A real simulator batch: 30 simulated minutes including an outage replay."""
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        assert publisher.main(["--dry-run", "--speed", "1e9", "--duration-h", "0.5",
+        assert publisher.main(["--dry-run", "--no-align-shifts", "--speed", "1e9", "--duration-h", "0.5",
                                "--start", "2026-10-28T05:30:00", "--outage-start-min", "10",
                                "--outage-duration-min", "3"]) == 0
     out = []
@@ -282,3 +282,71 @@ def test_savepoint_rolls_back_only_the_failing_message(repo: Repo) -> None:
     repo.commit()
     assert [r["ts"] for r in repo.get_zone_env("Z1", "2026-10-28T00:00:00Z", "2026-10-29T00:00:00Z")] == [
         "2026-10-28T00:30:00Z", "2026-10-28T00:30:10Z"]
+
+
+# ---------------------------------------------------------------- Day 3 Task 1a: canonical ordering
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def test_fractional_and_whole_second_ts_read_back_in_true_order(repo: Repo) -> None:
+    # As text "...:10.500Z" < "...:10Z" ('.' < 'Z'); the epoch column must win.
+    for ts in ("2026-10-28T00:00:10.500Z", "2026-10-28T00:00:11Z", "2026-10-28T00:00:10Z"):
+        repo.insert_zone_env("textile/zone/Z1/env", _env(ts), RX, [])
+        repo.insert_machine_status("textile/machine/M3/status", _machine(ts), RX, [])
+    expected = ["2026-10-28T00:00:10Z", "2026-10-28T00:00:10.500Z", "2026-10-28T00:00:11Z"]
+    assert [r["ts"] for r in repo.get_zone_env("Z1", "2026-10-28T00:00:00Z", "2026-10-28T01:00:00Z")] == expected
+    assert [r["ts"] for r in repo.get_machine_status("M3", "2026-10-28T00:00:00Z", "2026-10-28T01:00:00Z")] == expected
+    rows = repo.get_zone_env("Z1", "2026-10-28T00:00:00Z", "2026-10-28T01:00:00Z")
+    assert [r["ts_epoch_ms"] for r in rows] == sorted(r["ts_epoch_ms"] for r in rows)
+    # A range boundary in the middle of the second is honoured.
+    mid = repo.get_zone_env("Z1", "2026-10-28T00:00:10.250Z", "2026-10-28T00:00:11Z")
+    assert [r["ts"] for r in mid] == ["2026-10-28T00:00:10.500Z"]
+
+
+def test_ts_text_is_kept_exactly_as_published(repo: Repo) -> None:
+    repo.insert_zone_env("textile/zone/Z1/env", _env("2026-10-28T00:00:10.500Z"), RX, [])
+    (row,) = repo.get_zone_env("Z1", "2026-10-28T00:00:00Z", "2026-10-28T01:00:00Z")
+    assert row["ts"] == "2026-10-28T00:00:10.500Z" and row["ts_epoch_ms"] == 1793145610500
+
+
+def test_epoch_helpers_round_trip() -> None:
+    from db.repo import from_epoch_ms, to_epoch_ms
+    assert to_epoch_ms("2026-10-28T00:00:10Z") == 1793145610000
+    assert from_epoch_ms(1793145610000) == "2026-10-28T00:00:10Z"
+    assert from_epoch_ms(1793145610500) == "2026-10-28T00:00:10.500Z"
+
+
+def test_lwt_row_has_null_epoch(repo: Repo) -> None:
+    repo.insert_device_status("textile/status/ZN-Z4", {"schema_version": "1.1", "device_id": "ZN-Z4",
+                                                       "online": False}, RX, [])
+    stats = repo.get_ingest_stats("2026-10-28T00:00:00Z", "2026-10-29T00:00:00Z")
+    assert stats["last_seen"]["ZN-Z4"]["last_ts"] is None
+
+
+def test_migration_backfills_a_day2_database(tmp_path: Path) -> None:
+    import sqlite3
+
+    db = tmp_path / "day2.db"
+    conn = sqlite3.connect(db)
+    conn.executescript((FIXTURES / "day2_v1_schema.sql").read_text(encoding="utf-8"))
+    conn.executescript((FIXTURES / "day2_v1_rows.sql").read_text(encoding="utf-8"))
+    conn.commit()
+    conn.close()
+
+    with Repo(db) as r:
+        r.init_schema()                                  # detects v1 and migrates
+        assert r.schema_version() == 2
+        rows = r.get_zone_env("Z1", "2026-10-28T00:00:00Z", "2026-10-28T01:00:00Z")
+        assert [x["ts"] for x in rows] == ["2026-10-28T00:00:10Z", "2026-10-28T00:00:10.500Z",
+                                           "2026-10-28T00:00:11Z"]
+        assert [x["noise_dba"] for x in rows] == [91.0, 91.5, 92.0]     # text and values untouched
+        (a,) = r.get_zone_assignments("W101", "2026-10-28T00:00:00Z", "2026-10-28T01:00:00Z")
+        assert (a["from_epoch_ms"], a["to_epoch_ms"]) == (1793145600000, 1793147400000)
+        (s,) = r.get_worker_sessions("W101", "2026-10-28")
+        assert s["session_start_ms"] == 1793146800000
+        # New rows written after migration get their epoch too.
+        r.insert_zone_env("textile/zone/Z1/env", _env("2026-10-28T00:00:09Z"), RX, [])
+        assert r.get_zone_env("Z1", "2026-10-28T00:00:00Z", "2026-10-28T01:00:00Z")[0]["ts"] == "2026-10-28T00:00:09Z"
+        r.init_schema()                                  # re-running is a no-op
+        assert r.table_counts()["zone_env"] == 4

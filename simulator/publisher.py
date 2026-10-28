@@ -145,11 +145,16 @@ class Simulation:
     """Owns every model and turns each simulated tick into contract payloads."""
 
     def __init__(self, start: datetime, duration: timedelta, seed: int,
-                 outages: list[Outage] | None = None) -> None:
-        """Build all models from config.yaml for the window [start, start + duration)."""
+                 outages: list[Outage] | None = None, whole_sessions_only: bool = False) -> None:
+        """Build all models from config.yaml for the window [start, start + duration).
+
+        whole_sessions_only: simulate only crews whose whole session fits the window
+        (set by --align-shifts).
+        """
         self.start = start
         self.end = start + duration
         self.outages = list(outages or [])
+        self.whole_sessions_only = whole_sessions_only
         self.sim = config.get_simulation_config()
         mqtt_cfg = config.get_mqtt_config()
         self._prefix = mqtt_cfg["topic_prefix"]
@@ -172,7 +177,8 @@ class Simulation:
             MachineModel.from_config(m["machine_id"], schedule, rng, start)
             for m, rng in zip(machines_cfg, root.spawn(len(machines_cfg)))
         ]
-        self.workers = WorkerModel.from_config(schedule, root.spawn(1)[0], start, self.end)
+        self.workers = WorkerModel.from_config(schedule, root.spawn(1)[0], start, self.end,
+                                               whole_sessions_only=whole_sessions_only)
         self._ble_rng = root.spawn(1)[0]
         self._event_rng = root.spawn(1)[0]
 
@@ -392,6 +398,27 @@ def _default_start() -> datetime:
     return datetime(today.year, today.month, today.day, hours, minutes, tzinfo=tz).astimezone(timezone.utc)
 
 
+def align_window(start: datetime, duration: timedelta) -> tuple[datetime, datetime]:
+    """Shift-aligned run window for --align-shifts.
+
+    The start snaps back to the latest shift boundary at or before `start`, the end
+    (start + duration) extends to the next boundary at or after it, then both are
+    widened by `simulation.align_shifts` margins so the check-ins before and the
+    check-outs and overtime after are captured.
+    """
+    schedule = ShiftSchedule(config.get_shifts())
+    margins = config.get_simulation_config()["align_shifts"]
+    day = timedelta(days=1)
+    starts_before = [i.start for i in schedule.instances_between(start - day, start + timedelta(seconds=1))
+                     if i.start <= start]
+    raw_end = start + duration
+    starts_after = [i.start for i in schedule.instances_between(raw_end - timedelta(seconds=1), raw_end + day)
+                    if i.start >= raw_end]
+    aligned_start = max(starts_before) - timedelta(minutes=margins["margin_before_min"])
+    aligned_end = min(starts_after) + timedelta(minutes=margins["margin_after_min"])
+    return aligned_start, aligned_end
+
+
 def _parse_start(text: str) -> datetime:
     """Parse an ISO-8601 start time; naive values are taken as local mill time."""
     ts = datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -411,6 +438,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--start", type=_parse_start, default=None,
                    help="simulated start, ISO-8601 (default: today 06:00 Asia/Kolkata)")
     p.add_argument("--duration-h", type=float, default=8.0, help="simulated hours to run")
+    p.add_argument("--align-shifts", action=argparse.BooleanOptionalAction, default=True,
+                   help="snap the window to shift boundaries (plus margins) and simulate only whole "
+                        "sessions (default on); --no-align-shifts keeps the raw --start/--duration-h")
     p.add_argument("--seed", type=int, default=int(sim["random_seed"]))
     p.add_argument("--dry-run", action="store_true", help="print payloads instead of publishing")
     p.add_argument("--broker", default=mqtt_cfg["host"])
@@ -454,6 +484,12 @@ def main(argv: list[str] | None = None) -> int:
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = parse_args(argv)
     start = args.start or _default_start()
+    duration = timedelta(hours=args.duration_h)
+    if args.align_shifts:
+        aligned_start, aligned_end = align_window(start, duration)
+        log.info("aligned to shift boundaries: %s -> %s (requested %s + %g h); whole sessions only",
+                 iso_z(aligned_start), iso_z(aligned_end), iso_z(start), args.duration_h)
+        start, duration = aligned_start, aligned_end - aligned_start
     specs = list(args.extra_outage)
     if config.get_simulation_config()["outage"]["enabled"] and not args.no_outage:
         zone_device = next(z["device_id"] for z in config.get_zones() if z["zone_id"] == args.outage_zone)
@@ -465,7 +501,7 @@ def main(argv: list[str] | None = None) -> int:
         outages.append(outage)
         log.info("outage: %s offline %s -> %s", device_id, iso_z(outage.start), iso_z(outage.end))
 
-    simulation = Simulation(start, timedelta(hours=args.duration_h), args.seed, outages)
+    simulation = Simulation(start, duration, args.seed, outages, whole_sessions_only=args.align_shifts)
     if args.dry_run:
         sink: Sink = DryRunSink()
     else:

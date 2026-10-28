@@ -12,6 +12,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -56,7 +57,7 @@ def _run(argv: list[str]) -> list[tuple[str, dict]]:
 
 @pytest.fixture(scope="module")
 def messages() -> list[tuple[str, dict]]:
-    return _run(["--dry-run", "--speed", "1e9", "--duration-h", "1.5",
+    return _run(["--dry-run", "--no-align-shifts", "--speed", "1e9", "--duration-h", "1.5",
                  "--start", START_LOCAL, "--seed", "42",
                  "--outage-zone", "Z3", "--outage-start-min", "40", "--outage-duration-min", "4"])
 
@@ -262,14 +263,14 @@ def test_outage_buffers_then_replays_with_original_ts(messages: list[tuple[str, 
 
 
 def test_seeded_runs_are_identical() -> None:
-    argv = ["--dry-run", "--speed", "1e9", "--duration-h", "0.1", "--start", START_LOCAL, "--seed", "5"]
+    argv = ["--dry-run", "--no-align-shifts", "--speed", "1e9", "--duration-h", "0.1", "--start", START_LOCAL, "--seed", "5"]
     assert _run(argv) == _run(argv)
 
 
 def test_speed_paces_wall_clock() -> None:
     # 0.02 h = 72 simulated seconds; at 100x that is ~0.72 s of wall time.
     t0 = time.monotonic()
-    _run(["--dry-run", "--speed", "100", "--duration-h", "0.02", "--start", START_LOCAL])
+    _run(["--dry-run", "--no-align-shifts", "--speed", "100", "--duration-h", "0.02", "--start", START_LOCAL])
     assert 0.5 < time.monotonic() - t0 < 3.0
 
 
@@ -317,7 +318,7 @@ def test_ctrl_c_publishes_offline_for_every_device() -> None:
 
 def test_long_machine_outage_replays_records_older_than_late_threshold() -> None:
     """--extra-outage on a machine node: replayed records keep their original ts."""
-    msgs = _run(["--dry-run", "--speed", "1e9", "--duration-h", "3", "--start", START_LOCAL, "--no-outage",
+    msgs = _run(["--dry-run", "--no-align-shifts", "--speed", "1e9", "--duration-h", "3", "--start", START_LOCAL, "--no-outage",
                  "--extra-outage", "MN-M8:10:150"])
     m8 = [(i, t, p) for i, (t, p) in enumerate(msgs) if p["device_id"] == "MN-M8"]
     backlog = [(i, p) for i, t, p in m8 if _kind(t) == "status" and p["buffered_records"] > 0]
@@ -337,3 +338,57 @@ def test_bad_extra_outage_spec_is_an_error() -> None:
         publisher.parse_args(["--extra-outage", "MN-M99:10:5"])
     with pytest.raises(SystemExit):
         publisher.parse_args(["--extra-outage", "MN-M8:ten:5"])
+
+
+# ---------------------------------------------------------------- Day 3 Task 1b: --align-shifts
+
+def _gate_events(msgs: list[tuple[str, dict]]) -> list[dict]:
+    workers = {w["card_id"]: w["worker_id"] for w in config.get_workers()}
+    return [{"ts": p["ts"], "event": p["event"], "event_id": p["event_id"], "card_id": p["card_id"],
+             "worker_id": workers[p["card_id"]]} for t, p in msgs if _kind(t) == "rfid"]
+
+
+def test_align_window_snaps_to_shift_boundaries_plus_margins() -> None:
+    margins = config.get_simulation_config()["align_shifts"]
+    ist = timezone(timedelta(hours=5, minutes=30))
+    start, end = publisher.align_window(datetime(2026, 10, 28, 6, 0, tzinfo=ist), timedelta(hours=8))
+    assert start == datetime(2026, 10, 28, 6, 0, tzinfo=ist) - timedelta(minutes=margins["margin_before_min"])
+    assert end == datetime(2026, 10, 28, 14, 0, tzinfo=ist) + timedelta(minutes=margins["margin_after_min"])
+    # A mid-shift start snaps BACK to the shift that is running (C, 22:00 the day before).
+    start, _ = publisher.align_window(datetime(2026, 10, 28, 5, 30, tzinfo=ist), timedelta(hours=1))
+    assert start == datetime(2026, 10, 27, 22, 0, tzinfo=ist) - timedelta(minutes=margins["margin_before_min"])
+
+
+def test_aligned_run_produces_only_whole_unflagged_sessions() -> None:
+    from ingest.sessions import build_sessions
+    from shifts import ShiftSchedule
+
+    msgs = _run(["--dry-run", "--speed", "1e9", "--duration-h", "24", "--start", "2026-10-28T06:00:00",
+                 "--no-outage"])
+    shift = {w["worker_id"]: w["shift"] for w in config.get_workers()}
+    sessions = build_sessions(_gate_events(msgs), ShiftSchedule(config.get_shifts()), shift,
+                              config.get_sessions_config()["max_session_h"])
+    assert len(sessions) >= 20                      # every crew completes at least one shift
+    assert all(s["flags"] == [] for s in sessions), [s for s in sessions if s["flags"]]
+
+
+def test_raw_window_keeps_truncated_sessions_for_the_flagging_path() -> None:
+    from ingest.sessions import build_sessions
+    from shifts import ShiftSchedule
+
+    msgs = _run(["--dry-run", "--no-align-shifts", "--speed", "1e9", "--duration-h", "2", "--start",
+                 START_LOCAL, "--no-outage"])
+    shift = {w["worker_id"]: w["shift"] for w in config.get_workers()}
+    sessions = build_sessions(_gate_events(msgs), ShiftSchedule(config.get_shifts()), shift,
+                              config.get_sessions_config()["max_session_h"])
+    flags = {f for s in sessions for f in s["flags"]}
+    assert {"orphan_check_out", "unmatched_check_in"} <= flags
+
+
+def test_aligned_ground_truth_has_no_one_on_site_at_the_window_edges(tmp_path: Path) -> None:
+    out = tmp_path / "t.jsonl"
+    _run(["--dry-run", "--speed", "1e9", "--duration-h", "8", "--start", "2026-10-28T06:00:00",
+          "--no-outage", "--ground-truth-out", str(out)])
+    rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
+    first_ts, last_ts = rows[0]["ts"], rows[-1]["ts"]
+    assert all(r["zone_id"] is None for r in rows if r["ts"] in (first_ts, last_ts))

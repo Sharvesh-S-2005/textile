@@ -111,3 +111,11 @@ def test_same_second_tap_pairs_share_a_shift() -> None:
     for first, second in config.get_simulation_config()["worker_dynamics"]["same_second_tap_pairs"]:
         assert shift[first] == shift[second]
         assert order.index(first) < order.index(second)
+
+
+def test_align_margins_cover_check_in_and_overtime() -> None:
+    sim = config.get_simulation_config()
+    dyn, margins = sim["worker_dynamics"], sim["align_shifts"]
+    assert margins["margin_before_min"] >= dyn["check_in_before_min"]["max"]
+    longest_overtime = max(dyn["overtime"]["duration_min"]["max"], dyn["high_exposure"]["overtime_min"]["max"])
+    assert margins["margin_after_min"] >= longest_overtime + dyn["check_out_after_min"]["max"]

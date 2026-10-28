@@ -6,8 +6,10 @@ process writes. Write methods do not commit: the caller batches rows and calls
 new, so replaying the same records (outage replay, QoS 1 redelivery, re-ingest)
 never double-counts.
 
-Time ranges are half-open [start_ts, end_ts) on the stored ISO-8601 strings, and
-every time-range read is ordered by `ts` - never by arrival order.
+Time ranges are half-open [start_ts, end_ts). Callers pass ISO-8601 strings; every
+range filter and every ORDER BY uses the numeric `ts_epoch_ms` (or the derived
+tables' *_ms columns), never the `ts` text - as text, "...:10.500Z" sorts before
+"...:10Z". The `ts` text is kept exactly as the device published it.
 """
 
 from __future__ import annotations
@@ -16,11 +18,24 @@ import contextlib
 import hashlib
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 SCHEMA_PATH: Path = Path(__file__).resolve().parent / "schema.sql"
 BUSY_TIMEOUT_MS = 5000
+# PRAGMA user_version. 1 = Day 2 (no epoch columns); 2 = Day 3 (ts_epoch_ms).
+SCHEMA_VERSION = 2
+# Tables whose device `ts` gets a `ts_epoch_ms` companion.
+TS_TABLES: tuple[str, ...] = (
+    "zone_env", "ble_scans", "ble_sightings", "machine_status", "gate_events",
+    "ppe_entries", "device_status",
+)
+# Derived tables: text column -> epoch companion.
+DERIVED_EPOCH_COLUMNS: dict[str, dict[str, str]] = {
+    "zone_assignments": {"from_ts": "from_epoch_ms", "to_ts": "to_epoch_ms"},
+    "worker_sessions": {"session_start": "session_start_ms", "session_end": "session_end_ms"},
+}
 
 # Telemetry/event/status tables and the topic type each one stores.
 ACCEPTED_TABLES: dict[str, str] = {
@@ -38,6 +53,25 @@ ALL_TABLES: tuple[str, ...] = (
 )
 
 
+def to_epoch_ms(ts: str) -> int:
+    """UTC ISO-8601 with Z (whole or fractional seconds) -> integer ms since the epoch."""
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        raise ValueError(f"timestamp without timezone: {ts!r}")
+    return int(round(dt.timestamp() * 1000))
+
+
+def from_epoch_ms(ms: int) -> str:
+    """Integer ms since the epoch -> canonical UTC ISO-8601 with Z (ms only if non-zero)."""
+    dt = datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+    text = dt.strftime("%Y-%m-%dT%H:%M:%S")
+    return f"{text}.{ms % 1000:03d}Z" if ms % 1000 else f"{text}Z"
+
+
+def _epoch_or_none(ts: str | None) -> int | None:
+    return None if ts is None else to_epoch_ms(ts)
+
+
 def _quality(flags: list[str]) -> str:
     """'flagged' if any validation flag was raised, else 'ok'."""
     return "flagged" if flags else "ok"
@@ -49,6 +83,7 @@ def _common(topic: str, payload: dict[str, Any], received_ts: str, flags: list[s
         "topic": topic,
         "device_id": payload["device_id"],
         "ts": payload.get("ts"),
+        "ts_epoch_ms": _epoch_or_none(payload.get("ts")),     # parsed once, here, at ingest
         "received_ts": received_ts,
         "quality": _quality(flags),
         "flags": json.dumps(sorted(flags)),
@@ -82,9 +117,59 @@ class Repo:
     # ------------------------------------------------------------ lifecycle
 
     def init_schema(self) -> None:
-        """Create every table and index from schema.sql. Safe to re-run."""
+        """Create every table and index from schema.sql, migrating an older database
+        first if needed. Safe to re-run."""
+        if self._table_exists("zone_env") and not self._has_column("zone_env", "ts_epoch_ms"):
+            self.migrate_to_v2()
         self._conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._conn.commit()
+
+    def schema_version(self) -> int:
+        """PRAGMA user_version of this database."""
+        return int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+
+    def _table_exists(self, table: str) -> bool:
+        return self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone() is not None
+
+    def _has_column(self, table: str, column: str) -> bool:
+        return any(r["name"] == column for r in self._conn.execute(f"PRAGMA table_info({table})"))
+
+    def migrate_to_v2(self) -> dict[str, int]:
+        """Add and backfill the epoch-ms columns on a Day-2 (v1) database.
+
+        Each `ts` is parsed once in Python and written to its companion column; the
+        `ts` text is never modified. Old text-ordered indices are dropped (schema.sql
+        then creates the epoch ones). Returns rows backfilled per table. Raises if
+        any row with a `ts` is left without an epoch value.
+        """
+        backfilled: dict[str, int] = {}
+        columns = {t: {"ts": "ts_epoch_ms"} for t in TS_TABLES} | DERIVED_EPOCH_COLUMNS
+        for table, pairs in columns.items():
+            if not self._table_exists(table):
+                continue
+            for text_col, epoch_col in pairs.items():
+                if not self._has_column(table, epoch_col):
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {epoch_col} INTEGER")
+                rows = self._conn.execute(
+                    f"SELECT id, {text_col} FROM {table} WHERE {text_col} IS NOT NULL AND {epoch_col} IS NULL"
+                ).fetchall()
+                self._conn.executemany(f"UPDATE {table} SET {epoch_col} = ? WHERE id = ?",
+                                       [(to_epoch_ms(r[1]), r[0]) for r in rows])
+                left = self._conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE {text_col} IS NOT NULL AND {epoch_col} IS NULL"
+                ).fetchone()[0]
+                if left:
+                    raise RuntimeError(f"migration left {left} rows of {table}.{epoch_col} empty")
+                backfilled[f"{table}.{epoch_col}"] = len(rows)
+        for old_index in ("ix_zone_env_zone_ts", "ix_ble_scans_zone_ts", "ix_ble_sightings_tag_ts",
+                          "ix_ble_sightings_ts", "ix_machine_status_machine_ts", "ix_gate_events_worker_ts",
+                          "ix_ppe_entries_worker_ts", "ix_zone_assignments_worker_from",
+                          "ix_worker_sessions_worker_start"):
+            self._conn.execute(f"DROP INDEX IF EXISTS {old_index}")
+        self._conn.commit()
+        return backfilled
 
     def journal_mode(self) -> str:
         """The connection's journal mode (expected 'wal')."""
@@ -173,7 +258,7 @@ class Repo:
                 "n_tags": len(payload["tags"])}
         if not self._insert("ble_scans", scan):
             return False
-        scan_id = self._conn.execute(
+        scan_id = self._conn.execute(       # the UNIQUE key, so exact text match is correct
             "SELECT id FROM ble_scans WHERE device_id = ? AND ts = ? AND topic = ?",
             (common["device_id"], common["ts"], topic),
         ).fetchone()[0]
@@ -281,9 +366,10 @@ class Repo:
         for r in rows:
             self._conn.execute(
                 "INSERT INTO zone_assignments (worker_id, tag_id, zone_id, from_ts, to_ts, "
-                "confidence, method, label, outside_session, params) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, 'estimated_personal', ?, ?)",
+                "from_epoch_ms, to_epoch_ms, confidence, method, label, outside_session, params) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'estimated_personal', ?, ?)",
                 (r["worker_id"], r["tag_id"], r["zone_id"], r["from_ts"], r["to_ts"],
+                 to_epoch_ms(r["from_ts"]), to_epoch_ms(r["to_ts"]),
                  r["confidence"], method, int(r.get("outside_session", False)),
                  json.dumps(r["params"], sort_keys=True)),
             )
@@ -296,9 +382,11 @@ class Repo:
         n = 0
         for r in rows:
             self._conn.execute(
-                "INSERT INTO worker_sessions (worker_id, session_start, session_end, duration_s, "
-                "shift, flags, check_in_event_id, check_out_event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (r["worker_id"], r["session_start"], r["session_end"], r["duration_s"], r["shift"],
+                "INSERT INTO worker_sessions (worker_id, session_start, session_end, session_start_ms, "
+                "session_end_ms, duration_s, shift, flags, check_in_event_id, check_out_event_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (r["worker_id"], r["session_start"], r["session_end"], _epoch_or_none(r["session_start"]),
+                 to_epoch_ms(r["session_end"]), r["duration_s"], r["shift"],
                  json.dumps(sorted(r["flags"])), r.get("check_in_event_id"), r.get("check_out_event_id")),
             )
             n += 1
@@ -311,55 +399,58 @@ class Repo:
         return [_row_to_dict(r) for r in self._conn.execute(sql, params).fetchall()]
 
     def get_zone_env(self, zone_id: str, start_ts: str, end_ts: str) -> list[dict[str, Any]]:
-        """Zone readings with start_ts <= ts < end_ts, ordered by ts."""
+        """Zone readings with start_ts <= ts < end_ts, in true time order."""
         return self._select(
-            "SELECT * FROM zone_env WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts",
-            (zone_id, start_ts, end_ts))
+            "SELECT * FROM zone_env WHERE zone_id = ? AND ts_epoch_ms >= ? AND ts_epoch_ms < ? "
+            "ORDER BY ts_epoch_ms, id",
+            (zone_id, to_epoch_ms(start_ts), to_epoch_ms(end_ts)))
 
     def get_ble_scans(self, start_ts: str, end_ts: str) -> list[dict[str, Any]]:
         """BLE scan headers (including empty scans) in the range, ordered by ts then zone."""
         return self._select(
-            "SELECT * FROM ble_scans WHERE ts >= ? AND ts < ? ORDER BY ts, zone_id",
-            (start_ts, end_ts))
+            "SELECT * FROM ble_scans WHERE ts_epoch_ms >= ? AND ts_epoch_ms < ? ORDER BY ts_epoch_ms, zone_id",
+            (to_epoch_ms(start_ts), to_epoch_ms(end_ts)))
 
     def get_ble_sightings(self, start_ts: str, end_ts: str) -> list[dict[str, Any]]:
         """Raw tag sightings in the range, ordered by ts, then zone, then tag."""
         return self._select(
-            "SELECT * FROM ble_sightings WHERE ts >= ? AND ts < ? ORDER BY ts, zone_id, tag_id",
-            (start_ts, end_ts))
+            "SELECT * FROM ble_sightings WHERE ts_epoch_ms >= ? AND ts_epoch_ms < ? "
+            "ORDER BY ts_epoch_ms, zone_id, tag_id",
+            (to_epoch_ms(start_ts), to_epoch_ms(end_ts)))
 
     def get_ble_time_range(self) -> tuple[str, str] | None:
         """(earliest ts, latest ts) over all BLE scans, or None if there are none."""
-        row = self._conn.execute("SELECT MIN(ts), MAX(ts) FROM ble_scans").fetchone()
-        return None if row[0] is None else (row[0], row[1])
+        row = self._conn.execute("SELECT MIN(ts_epoch_ms), MAX(ts_epoch_ms) FROM ble_scans").fetchone()
+        return None if row[0] is None else (from_epoch_ms(row[0]), from_epoch_ms(row[1]))
 
     def get_machine_status(self, machine_id: str, start_ts: str, end_ts: str) -> list[dict[str, Any]]:
         """Machine readings in the range, ordered by ts."""
         return self._select(
-            "SELECT * FROM machine_status WHERE machine_id = ? AND ts >= ? AND ts < ? ORDER BY ts",
-            (machine_id, start_ts, end_ts))
+            "SELECT * FROM machine_status WHERE machine_id = ? AND ts_epoch_ms >= ? AND ts_epoch_ms < ? "
+            "ORDER BY ts_epoch_ms, id",
+            (machine_id, to_epoch_ms(start_ts), to_epoch_ms(end_ts)))
 
     def get_gate_events(self, start_ts: str | None = None, end_ts: str | None = None) -> list[dict[str, Any]]:
         """Gate events (optionally in a range), ordered by ts then event_id."""
         if start_ts is None or end_ts is None:
-            return self._select("SELECT * FROM gate_events ORDER BY ts, event_id")
+            return self._select("SELECT * FROM gate_events ORDER BY ts_epoch_ms, event_id")
         return self._select(
-            "SELECT * FROM gate_events WHERE ts >= ? AND ts < ? ORDER BY ts, event_id",
-            (start_ts, end_ts))
+            "SELECT * FROM gate_events WHERE ts_epoch_ms >= ? AND ts_epoch_ms < ? ORDER BY ts_epoch_ms, event_id",
+            (to_epoch_ms(start_ts), to_epoch_ms(end_ts)))
 
     def get_zone_assignments(self, worker_id: str, start_ts: str, end_ts: str) -> list[dict[str, Any]]:
         """Assignment intervals for a worker that overlap [start_ts, end_ts), ordered by from_ts."""
         return self._select(
-            "SELECT * FROM zone_assignments WHERE worker_id = ? AND from_ts < ? AND to_ts > ? "
-            "ORDER BY from_ts",
-            (worker_id, end_ts, start_ts))
+            "SELECT * FROM zone_assignments WHERE worker_id = ? AND from_epoch_ms < ? AND to_epoch_ms > ? "
+            "ORDER BY from_epoch_ms",
+            (worker_id, to_epoch_ms(end_ts), to_epoch_ms(start_ts)))
 
     def get_all_zone_assignments(self, method: str | None = None) -> list[dict[str, Any]]:
         """Every assignment (optionally for one method), ordered by worker then from_ts."""
         if method is None:
-            return self._select("SELECT * FROM zone_assignments ORDER BY worker_id, from_ts")
+            return self._select("SELECT * FROM zone_assignments ORDER BY worker_id, from_epoch_ms")
         return self._select(
-            "SELECT * FROM zone_assignments WHERE method = ? ORDER BY worker_id, from_ts", (method,))
+            "SELECT * FROM zone_assignments WHERE method = ? ORDER BY worker_id, from_epoch_ms", (method,))
 
     def set_outside_session(self, assignment_ids: Iterable[int], outside: bool) -> None:
         """Mark assignments as inside or outside any worker session."""
@@ -373,17 +464,18 @@ class Repo:
         if date is None:
             return self._select(
                 "SELECT * FROM worker_sessions WHERE worker_id = ? "
-                "ORDER BY COALESCE(session_start, session_end)", (worker_id,))
+                "ORDER BY COALESCE(session_start_ms, session_end_ms)", (worker_id,))
         return self._select(
             "SELECT * FROM worker_sessions WHERE worker_id = ? "
-            "AND substr(COALESCE(session_start, session_end), 1, 10) = ? "
-            "ORDER BY COALESCE(session_start, session_end)",
-            (worker_id, date))
+            "AND COALESCE(session_start_ms, session_end_ms) >= ? "
+            "AND COALESCE(session_start_ms, session_end_ms) < ? "
+            "ORDER BY COALESCE(session_start_ms, session_end_ms)",
+            (worker_id, to_epoch_ms(f"{date}T00:00:00Z"), to_epoch_ms(f"{date}T00:00:00Z") + 86_400_000))
 
     def get_all_worker_sessions(self) -> list[dict[str, Any]]:
         """Every session, ordered by worker then start."""
         return self._select(
-            "SELECT * FROM worker_sessions ORDER BY worker_id, COALESCE(session_start, session_end)")
+            "SELECT * FROM worker_sessions ORDER BY worker_id, COALESCE(session_start_ms, session_end_ms)")
 
     def get_rejected(self) -> list[dict[str, Any]]:
         """Every rejected record, ordered by arrival."""
@@ -414,13 +506,16 @@ class Repo:
                     "AND received_ts >= ? AND received_ts < ? GROUP BY flags", (start_ts, end_ts)):
                 for name in json.loads(flags_json):
                     flag_counts[name] = flag_counts.get(name, 0) + int(n)
-            for device_id, last_rx, last_ts in self._conn.execute(
-                    f"SELECT device_id, MAX(received_ts), MAX(ts) FROM {table} "
+            for device_id, last_rx, last_ms in self._conn.execute(
+                    f"SELECT device_id, MAX(received_ts), MAX(ts_epoch_ms) FROM {table} "
                     "WHERE received_ts >= ? AND received_ts < ? GROUP BY device_id", (start_ts, end_ts)):
-                seen = last_seen.setdefault(device_id, {"last_received_ts": last_rx, "last_ts": last_ts})
+                seen = last_seen.setdefault(device_id, {"last_received_ts": last_rx, "last_ts_ms": None})
                 seen["last_received_ts"] = max(seen["last_received_ts"], last_rx)
-                if last_ts is not None and (seen["last_ts"] is None or last_ts > seen["last_ts"]):
-                    seen["last_ts"] = last_ts
+                if last_ms is not None and (seen["last_ts_ms"] is None or last_ms > seen["last_ts_ms"]):
+                    seen["last_ts_ms"] = last_ms
+        for seen in last_seen.values():
+            ms = seen.pop("last_ts_ms")
+            seen["last_ts"] = None if ms is None else from_epoch_ms(ms)
         rejected = {
             reason: int(n) for reason, n in self._conn.execute(
                 "SELECT reason, COUNT(*) FROM rejected_records "

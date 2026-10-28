@@ -2,11 +2,15 @@
 --
 -- Timestamps are UTC ISO-8601 strings with a Z suffix. `ts` is the device's own
 -- timestamp, stored exactly as published; `received_ts` is when the backend got
--- the message. Rows can arrive out of `ts` order (outage replay): always ORDER BY ts.
+-- the message. Rows can arrive out of `ts` order (outage replay).
+--
+-- `ts_epoch_ms` is `ts` parsed once at ingest (UTC milliseconds since the epoch).
+-- Every ordered or ranged read uses it, never the `ts` text: as text,
+-- "...:10.500Z" sorts BEFORE "...:10Z" because '.' (0x2E) < 'Z' (0x5A).
 --
 -- Every telemetry table carries: id, topic, device_id, ts, received_ts, quality
 -- ('ok' | 'flagged'), flags (JSON array of flag names, '[]' when clean),
--- schema_version. A value the device reported as null is stored as NULL; the
+-- schema_version, ts_epoch_ms. A value the device reported as null is stored as NULL; the
 -- reason is in the per-sensor flag column and in `flags`.
 
 -- ---------------------------------------------------------------- telemetry
@@ -16,6 +20,7 @@ CREATE TABLE IF NOT EXISTS zone_env (
     topic           TEXT NOT NULL,
     device_id       TEXT NOT NULL,
     ts              TEXT NOT NULL,
+    ts_epoch_ms     INTEGER NOT NULL,
     received_ts     TEXT NOT NULL,
     quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
     flags           TEXT NOT NULL DEFAULT '[]',
@@ -36,7 +41,7 @@ CREATE TABLE IF NOT EXISTS zone_env (
     flag_co2        TEXT NOT NULL,
     UNIQUE (device_id, ts, topic)
 );
-CREATE INDEX IF NOT EXISTS ix_zone_env_zone_ts ON zone_env (zone_id, ts);
+CREATE INDEX IF NOT EXISTS ix_zone_env_zone_epoch ON zone_env (zone_id, ts_epoch_ms);
 CREATE INDEX IF NOT EXISTS ix_zone_env_received ON zone_env (received_ts);
 
 -- One row per BLE scan message, including scans that saw no tags (meaningful:
@@ -46,6 +51,7 @@ CREATE TABLE IF NOT EXISTS ble_scans (
     topic           TEXT NOT NULL,
     device_id       TEXT NOT NULL,
     ts              TEXT NOT NULL,
+    ts_epoch_ms     INTEGER NOT NULL,
     received_ts     TEXT NOT NULL,
     quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
     flags           TEXT NOT NULL DEFAULT '[]',
@@ -55,7 +61,8 @@ CREATE TABLE IF NOT EXISTS ble_scans (
     n_tags          INTEGER NOT NULL,
     UNIQUE (device_id, ts, topic)
 );
-CREATE INDEX IF NOT EXISTS ix_ble_scans_zone_ts ON ble_scans (zone_id, ts);
+CREATE INDEX IF NOT EXISTS ix_ble_scans_zone_epoch ON ble_scans (zone_id, ts_epoch_ms);
+CREATE INDEX IF NOT EXISTS ix_ble_scans_epoch ON ble_scans (ts_epoch_ms);
 CREATE INDEX IF NOT EXISTS ix_ble_scans_received ON ble_scans (received_ts);
 
 -- One row per tag seen per zone per scan window (raw, unresolved).
@@ -65,6 +72,7 @@ CREATE TABLE IF NOT EXISTS ble_sightings (
     topic           TEXT NOT NULL,
     device_id       TEXT NOT NULL,
     ts              TEXT NOT NULL,
+    ts_epoch_ms     INTEGER NOT NULL,
     received_ts     TEXT NOT NULL,
     quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
     flags           TEXT NOT NULL DEFAULT '[]',
@@ -75,14 +83,15 @@ CREATE TABLE IF NOT EXISTS ble_sightings (
     seen_count      INTEGER NOT NULL,
     UNIQUE (device_id, ts, topic, tag_id)
 );
-CREATE INDEX IF NOT EXISTS ix_ble_sightings_tag_ts ON ble_sightings (tag_id, ts);
-CREATE INDEX IF NOT EXISTS ix_ble_sightings_ts ON ble_sightings (ts);
+CREATE INDEX IF NOT EXISTS ix_ble_sightings_tag_epoch ON ble_sightings (tag_id, ts_epoch_ms);
+CREATE INDEX IF NOT EXISTS ix_ble_sightings_epoch ON ble_sightings (ts_epoch_ms);
 
 CREATE TABLE IF NOT EXISTS machine_status (
     id              INTEGER PRIMARY KEY,
     topic           TEXT NOT NULL,
     device_id       TEXT NOT NULL,
     ts              TEXT NOT NULL,
+    ts_epoch_ms     INTEGER NOT NULL,
     received_ts     TEXT NOT NULL,
     quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
     flags           TEXT NOT NULL DEFAULT '[]',
@@ -97,7 +106,7 @@ CREATE TABLE IF NOT EXISTS machine_status (
     flag_vibration  TEXT NOT NULL,
     UNIQUE (device_id, ts, topic)
 );
-CREATE INDEX IF NOT EXISTS ix_machine_status_machine_ts ON machine_status (machine_id, ts);
+CREATE INDEX IF NOT EXISTS ix_machine_status_machine_epoch ON machine_status (machine_id, ts_epoch_ms);
 CREATE INDEX IF NOT EXISTS ix_machine_status_received ON machine_status (received_ts);
 
 -- ---------------------------------------------------------------- events
@@ -108,6 +117,7 @@ CREATE TABLE IF NOT EXISTS gate_events (
     topic           TEXT NOT NULL,
     device_id       TEXT NOT NULL,
     ts              TEXT NOT NULL,
+    ts_epoch_ms     INTEGER NOT NULL,
     received_ts     TEXT NOT NULL,
     quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
     flags           TEXT NOT NULL DEFAULT '[]',
@@ -117,7 +127,8 @@ CREATE TABLE IF NOT EXISTS gate_events (
     event           TEXT NOT NULL CHECK (event IN ('check_in', 'check_out')),
     gate_id         TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_gate_events_worker_ts ON gate_events (worker_id, ts);
+CREATE INDEX IF NOT EXISTS ix_gate_events_worker_epoch ON gate_events (worker_id, ts_epoch_ms);
+CREATE INDEX IF NOT EXISTS ix_gate_events_epoch ON gate_events (ts_epoch_ms);
 CREATE INDEX IF NOT EXISTS ix_gate_events_received ON gate_events (received_ts);
 
 -- Supervisor-observed PPE. Never used to reduce a calculated dose.
@@ -127,6 +138,7 @@ CREATE TABLE IF NOT EXISTS ppe_entries (
     topic           TEXT NOT NULL,
     device_id       TEXT NOT NULL,
     ts              TEXT NOT NULL,
+    ts_epoch_ms     INTEGER NOT NULL,
     received_ts     TEXT NOT NULL,
     quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
     flags           TEXT NOT NULL DEFAULT '[]',
@@ -136,7 +148,7 @@ CREATE TABLE IF NOT EXISTS ppe_entries (
     respiratory_ppe TEXT NOT NULL,
     recorded_by     TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_ppe_entries_worker_ts ON ppe_entries (worker_id, ts);
+CREATE INDEX IF NOT EXISTS ix_ppe_entries_worker_epoch ON ppe_entries (worker_id, ts_epoch_ms);
 CREATE INDEX IF NOT EXISTS ix_ppe_entries_received ON ppe_entries (received_ts);
 
 -- Birth (online: true, with ts) and LWT (online: false, ts NULL per contract v1.1a).
@@ -145,6 +157,7 @@ CREATE TABLE IF NOT EXISTS device_status (
     topic            TEXT NOT NULL,
     device_id        TEXT NOT NULL,
     ts               TEXT,           -- NULL for the LWT form; never invented
+    ts_epoch_ms      INTEGER,        -- NULL exactly when ts is NULL
     received_ts      TEXT NOT NULL,
     quality          TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
     flags            TEXT NOT NULL DEFAULT '[]',
@@ -156,6 +169,7 @@ CREATE TABLE IF NOT EXISTS device_status (
     UNIQUE (device_id, ts, topic)    -- NULL ts rows are deduplicated in db/repo.py
 );
 CREATE INDEX IF NOT EXISTS ix_device_status_device ON device_status (device_id, received_ts);
+CREATE INDEX IF NOT EXISTS ix_device_status_epoch ON device_status (ts_epoch_ms);
 
 -- ---------------------------------------------------------------- rejections
 
@@ -184,6 +198,8 @@ CREATE TABLE IF NOT EXISTS zone_assignments (
     zone_id         TEXT NOT NULL,  -- a configured zone, or 'UNKNOWN'
     from_ts         TEXT NOT NULL,
     to_ts           TEXT NOT NULL,
+    from_epoch_ms   INTEGER NOT NULL,
+    to_epoch_ms     INTEGER NOT NULL,
     confidence      REAL NOT NULL CHECK (confidence BETWEEN 0.0 AND 1.0),
     method          TEXT NOT NULL,
     label           TEXT NOT NULL CHECK (label = 'estimated_personal'),
@@ -191,7 +207,7 @@ CREATE TABLE IF NOT EXISTS zone_assignments (
     params          TEXT NOT NULL,  -- JSON of the algorithm parameters used
     CHECK (from_ts < to_ts)
 );
-CREATE INDEX IF NOT EXISTS ix_zone_assignments_worker_from ON zone_assignments (worker_id, from_ts);
+CREATE INDEX IF NOT EXISTS ix_zone_assignments_worker_from ON zone_assignments (worker_id, from_epoch_ms);
 
 -- Shift sessions resolved from gate events [session_start, session_end).
 CREATE TABLE IF NOT EXISTS worker_sessions (
@@ -199,10 +215,12 @@ CREATE TABLE IF NOT EXISTS worker_sessions (
     worker_id          TEXT NOT NULL,
     session_start      TEXT,         -- inferred shift start for an orphan check-out (flagged)
     session_end        TEXT NOT NULL,  -- inferred shift end for an unmatched check-in (flagged)
+    session_start_ms   INTEGER,
+    session_end_ms     INTEGER NOT NULL,
     duration_s         INTEGER,
     shift              TEXT NOT NULL,
     flags              TEXT NOT NULL DEFAULT '[]',
     check_in_event_id  TEXT,
     check_out_event_id TEXT
 );
-CREATE INDEX IF NOT EXISTS ix_worker_sessions_worker_start ON worker_sessions (worker_id, session_start);
+CREATE INDEX IF NOT EXISTS ix_worker_sessions_worker_start ON worker_sessions (worker_id, session_start_ms);

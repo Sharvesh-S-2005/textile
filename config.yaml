@@ -122,6 +122,14 @@ simulation:
     start_offset_min: 90           # simulated minutes after the run starts
     duration_min: 5
 
+  # publisher --align-shifts (default on): start snaps back to the latest shift
+  # boundary, end extends to the next one, then both are widened by these margins,
+  # and only crews whose whole session fits are simulated. Shifts overlap at every
+  # handover, so no cut point avoids truncating someone otherwise.
+  align_shifts:
+    margin_before_min: 20          # >= worker_dynamics.check_in_before_min.max (15)
+    margin_after_min: 200          # >= high_exposure.overtime_min.max (180) + check_out_after_min.max (10)
+
 # Physical devices that are not zone or machine nodes.
 devices:
   gate: {device_id: GW-01, gate_id: GATE-A}

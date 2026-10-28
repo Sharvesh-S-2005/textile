@@ -100,7 +100,7 @@ def test_ground_truth_goes_to_a_file_never_to_mqtt(tmp_path: Path) -> None:
     out = tmp_path / "truth.jsonl"
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        assert publisher.main(["--dry-run", "--speed", "1e9", "--duration-h", "0.1", "--start",
+        assert publisher.main(["--dry-run", "--no-align-shifts", "--speed", "1e9", "--duration-h", "0.1", "--start",
                                "2026-10-28T05:30:00", "--ground-truth-out", str(out)]) == 0
     rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
     assert rows and set(rows[0]) == {"ts", "worker_id", "tag_id", "zone_id"}
@@ -112,7 +112,7 @@ def test_ground_truth_goes_to_a_file_never_to_mqtt(tmp_path: Path) -> None:
     # Same number of payloads as without the flag: nothing extra is published.
     buf2 = io.StringIO()
     with contextlib.redirect_stdout(buf2):
-        publisher.main(["--dry-run", "--speed", "1e9", "--duration-h", "0.1", "--start", "2026-10-28T05:30:00"])
+        publisher.main(["--dry-run", "--no-align-shifts", "--speed", "1e9", "--duration-h", "0.1", "--start", "2026-10-28T05:30:00"])
     assert len(buf2.getvalue().splitlines()) == len(published.splitlines())
 
 

@@ -86,6 +86,7 @@ class WorkerModel:
         rng: np.random.Generator,
         start: datetime,
         end: datetime,
+        whole_sessions_only: bool = False,
     ) -> None:
         """Build every worker's timeline for shifts overlapping [start, end).
 
@@ -96,6 +97,10 @@ class WorkerModel:
             schedule: shift calendar.
             rng: random generator; one child stream is spawned per worker.
             start, end: simulated window (UTC, timezone-aware).
+            whole_sessions_only: keep only shift instances whose whole session
+                (check-in to check-out) lies inside [start, end). Crews cut by the
+                window edge are then simply not on site. Shifts overlap at every
+                handover, so no cut point avoids truncating someone otherwise.
         """
         self._d = dynamics
         self._adjacency = adjacency
@@ -113,7 +118,14 @@ class WorkerModel:
         for worker, w_rng in zip(workers, child_rngs):
             segments: list[Segment] = []
             for shift in schedule.instances_between(start - margin, end + margin, worker["shift"]):
-                segments.extend(self._shift_timeline(worker, shift, w_rng))
+                n_rfid, n_ppe = len(self.rfid_events), len(self.ppe_events)
+                shift_segments = self._shift_timeline(worker, shift, w_rng)
+                whole = shift_segments[0].start >= start and shift_segments[-1].end <= end
+                if whole_sessions_only and not whole:
+                    del self.rfid_events[n_rfid:]       # drop this cut session's events too
+                    del self.ppe_events[n_ppe:]
+                    continue
+                segments.extend(shift_segments)
             self.timelines[worker["worker_id"]] = _merge(segments)
         self._starts = {wid: [s.start for s in segs] for wid, segs in self.timelines.items()}
         self.rfid_events.sort(key=lambda e: e.ts)
@@ -121,7 +133,8 @@ class WorkerModel:
 
     @classmethod
     def from_config(
-        cls, schedule: ShiftSchedule, rng: np.random.Generator, start: datetime, end: datetime
+        cls, schedule: ShiftSchedule, rng: np.random.Generator, start: datetime, end: datetime,
+        whole_sessions_only: bool = False,
     ) -> WorkerModel:
         """Build the model using the project config.yaml."""
         return cls(
@@ -132,6 +145,7 @@ class WorkerModel:
             rng=rng,
             start=start,
             end=end,
+            whole_sessions_only=whole_sessions_only,
         )
 
     # ------------------------------------------------------------ generation

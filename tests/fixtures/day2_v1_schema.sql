@@ -1,0 +1,208 @@
+-- SQLite schema for the textile OHS backend. Safe to re-run (IF NOT EXISTS).
+--
+-- Timestamps are UTC ISO-8601 strings with a Z suffix. `ts` is the device's own
+-- timestamp, stored exactly as published; `received_ts` is when the backend got
+-- the message. Rows can arrive out of `ts` order (outage replay): always ORDER BY ts.
+--
+-- Every telemetry table carries: id, topic, device_id, ts, received_ts, quality
+-- ('ok' | 'flagged'), flags (JSON array of flag names, '[]' when clean),
+-- schema_version. A value the device reported as null is stored as NULL; the
+-- reason is in the per-sensor flag column and in `flags`.
+
+-- ---------------------------------------------------------------- telemetry
+
+CREATE TABLE IF NOT EXISTS zone_env (
+    id              INTEGER PRIMARY KEY,
+    topic           TEXT NOT NULL,
+    device_id       TEXT NOT NULL,
+    ts              TEXT NOT NULL,
+    received_ts     TEXT NOT NULL,
+    quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
+    flags           TEXT NOT NULL DEFAULT '[]',
+    schema_version  TEXT NOT NULL,
+    zone_id         TEXT NOT NULL,
+    noise_dba       REAL,
+    noise_peak_dba  REAL,
+    pm25_ugm3       REAL,   -- raw, uncorrected (humidity correction is exposure/dust.py)
+    pm10_ugm3       REAL,   -- raw, uncorrected
+    temp_c          REAL,
+    rh_pct          REAL,
+    globe_temp_c    REAL,
+    co2_ppm         INTEGER,
+    flag_noise      TEXT NOT NULL,
+    flag_pm         TEXT NOT NULL,
+    flag_temp_rh    TEXT NOT NULL,
+    flag_globe      TEXT NOT NULL,
+    flag_co2        TEXT NOT NULL,
+    UNIQUE (device_id, ts, topic)
+);
+CREATE INDEX IF NOT EXISTS ix_zone_env_zone_ts ON zone_env (zone_id, ts);
+CREATE INDEX IF NOT EXISTS ix_zone_env_received ON zone_env (received_ts);
+
+-- One row per BLE scan message, including scans that saw no tags (meaningful:
+-- the node was alive and nobody was in range).
+CREATE TABLE IF NOT EXISTS ble_scans (
+    id              INTEGER PRIMARY KEY,
+    topic           TEXT NOT NULL,
+    device_id       TEXT NOT NULL,
+    ts              TEXT NOT NULL,
+    received_ts     TEXT NOT NULL,
+    quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
+    flags           TEXT NOT NULL DEFAULT '[]',
+    schema_version  TEXT NOT NULL,
+    zone_id         TEXT NOT NULL,
+    scan_window_s   INTEGER NOT NULL,
+    n_tags          INTEGER NOT NULL,
+    UNIQUE (device_id, ts, topic)
+);
+CREATE INDEX IF NOT EXISTS ix_ble_scans_zone_ts ON ble_scans (zone_id, ts);
+CREATE INDEX IF NOT EXISTS ix_ble_scans_received ON ble_scans (received_ts);
+
+-- One row per tag seen per zone per scan window (raw, unresolved).
+CREATE TABLE IF NOT EXISTS ble_sightings (
+    id              INTEGER PRIMARY KEY,
+    scan_id         INTEGER NOT NULL REFERENCES ble_scans (id),
+    topic           TEXT NOT NULL,
+    device_id       TEXT NOT NULL,
+    ts              TEXT NOT NULL,
+    received_ts     TEXT NOT NULL,
+    quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
+    flags           TEXT NOT NULL DEFAULT '[]',
+    schema_version  TEXT NOT NULL,
+    zone_id         TEXT NOT NULL,
+    tag_id          TEXT NOT NULL,
+    rssi_dbm        INTEGER NOT NULL,
+    seen_count      INTEGER NOT NULL,
+    UNIQUE (device_id, ts, topic, tag_id)
+);
+CREATE INDEX IF NOT EXISTS ix_ble_sightings_tag_ts ON ble_sightings (tag_id, ts);
+CREATE INDEX IF NOT EXISTS ix_ble_sightings_ts ON ble_sightings (ts);
+
+CREATE TABLE IF NOT EXISTS machine_status (
+    id              INTEGER PRIMARY KEY,
+    topic           TEXT NOT NULL,
+    device_id       TEXT NOT NULL,
+    ts              TEXT NOT NULL,
+    received_ts     TEXT NOT NULL,
+    quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
+    flags           TEXT NOT NULL DEFAULT '[]',
+    schema_version  TEXT NOT NULL,
+    machine_id      TEXT NOT NULL,
+    zone_id         TEXT NOT NULL,
+    current_a       REAL,
+    running         INTEGER NOT NULL CHECK (running IN (0, 1)),
+    vib_rms_g       REAL,
+    vib_peak_g      REAL,
+    flag_current    TEXT NOT NULL,
+    flag_vibration  TEXT NOT NULL,
+    UNIQUE (device_id, ts, topic)
+);
+CREATE INDEX IF NOT EXISTS ix_machine_status_machine_ts ON machine_status (machine_id, ts);
+CREATE INDEX IF NOT EXISTS ix_machine_status_received ON machine_status (received_ts);
+
+-- ---------------------------------------------------------------- events
+
+CREATE TABLE IF NOT EXISTS gate_events (
+    id              INTEGER PRIMARY KEY,
+    event_id        TEXT NOT NULL UNIQUE,
+    topic           TEXT NOT NULL,
+    device_id       TEXT NOT NULL,
+    ts              TEXT NOT NULL,
+    received_ts     TEXT NOT NULL,
+    quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
+    flags           TEXT NOT NULL DEFAULT '[]',
+    schema_version  TEXT NOT NULL,
+    card_id         TEXT NOT NULL,
+    worker_id       TEXT,           -- resolved from card_id via config; NULL if unknown card
+    event           TEXT NOT NULL CHECK (event IN ('check_in', 'check_out')),
+    gate_id         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_gate_events_worker_ts ON gate_events (worker_id, ts);
+CREATE INDEX IF NOT EXISTS ix_gate_events_received ON gate_events (received_ts);
+
+-- Supervisor-observed PPE. Never used to reduce a calculated dose.
+CREATE TABLE IF NOT EXISTS ppe_entries (
+    id              INTEGER PRIMARY KEY,
+    event_id        TEXT NOT NULL UNIQUE,
+    topic           TEXT NOT NULL,
+    device_id       TEXT NOT NULL,
+    ts              TEXT NOT NULL,
+    received_ts     TEXT NOT NULL,
+    quality         TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
+    flags           TEXT NOT NULL DEFAULT '[]',
+    schema_version  TEXT NOT NULL,
+    worker_id       TEXT NOT NULL,
+    hearing_ppe     TEXT NOT NULL,
+    respiratory_ppe TEXT NOT NULL,
+    recorded_by     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_ppe_entries_worker_ts ON ppe_entries (worker_id, ts);
+CREATE INDEX IF NOT EXISTS ix_ppe_entries_received ON ppe_entries (received_ts);
+
+-- Birth (online: true, with ts) and LWT (online: false, ts NULL per contract v1.1a).
+CREATE TABLE IF NOT EXISTS device_status (
+    id               INTEGER PRIMARY KEY,
+    topic            TEXT NOT NULL,
+    device_id        TEXT NOT NULL,
+    ts               TEXT,           -- NULL for the LWT form; never invented
+    received_ts      TEXT NOT NULL,
+    quality          TEXT NOT NULL CHECK (quality IN ('ok', 'flagged')),
+    flags            TEXT NOT NULL DEFAULT '[]',
+    schema_version   TEXT NOT NULL,
+    online           INTEGER NOT NULL CHECK (online IN (0, 1)),
+    firmware         TEXT,
+    uptime_s         INTEGER,
+    buffered_records INTEGER,
+    UNIQUE (device_id, ts, topic)    -- NULL ts rows are deduplicated in db/repo.py
+);
+CREATE INDEX IF NOT EXISTS ix_device_status_device ON device_status (device_id, received_ts);
+
+-- ---------------------------------------------------------------- rejections
+
+CREATE TABLE IF NOT EXISTS rejected_records (
+    id              INTEGER PRIMARY KEY,
+    received_ts     TEXT NOT NULL,
+    topic           TEXT NOT NULL,
+    device_id       TEXT,           -- if it could be read from the payload
+    reason          TEXT NOT NULL,  -- closed set, defined in ingest/validation.py
+    detail          TEXT NOT NULL,
+    raw_payload     BLOB NOT NULL,  -- exact bytes received
+    payload_sha256  TEXT NOT NULL,
+    UNIQUE (topic, payload_sha256)  -- identical redelivery is not counted twice
+);
+CREATE INDEX IF NOT EXISTS ix_rejected_reason ON rejected_records (reason);
+CREATE INDEX IF NOT EXISTS ix_rejected_received ON rejected_records (received_ts);
+
+-- ---------------------------------------------------------------- derived
+
+-- Resolved worker-in-zone intervals [from_ts, to_ts). Written by the
+-- localisation pass. Every row is an inference: label = 'estimated_personal'.
+CREATE TABLE IF NOT EXISTS zone_assignments (
+    id              INTEGER PRIMARY KEY,
+    worker_id       TEXT NOT NULL,
+    tag_id          TEXT NOT NULL,
+    zone_id         TEXT NOT NULL,  -- a configured zone, or 'UNKNOWN'
+    from_ts         TEXT NOT NULL,
+    to_ts           TEXT NOT NULL,
+    confidence      REAL NOT NULL CHECK (confidence BETWEEN 0.0 AND 1.0),
+    method          TEXT NOT NULL,
+    label           TEXT NOT NULL CHECK (label = 'estimated_personal'),
+    outside_session INTEGER NOT NULL DEFAULT 0 CHECK (outside_session IN (0, 1)),
+    params          TEXT NOT NULL,  -- JSON of the algorithm parameters used
+    CHECK (from_ts < to_ts)
+);
+CREATE INDEX IF NOT EXISTS ix_zone_assignments_worker_from ON zone_assignments (worker_id, from_ts);
+
+-- Shift sessions resolved from gate events [session_start, session_end).
+CREATE TABLE IF NOT EXISTS worker_sessions (
+    id                 INTEGER PRIMARY KEY,
+    worker_id          TEXT NOT NULL,
+    session_start      TEXT,         -- inferred shift start for an orphan check-out (flagged)
+    session_end        TEXT NOT NULL,  -- inferred shift end for an unmatched check-in (flagged)
+    duration_s         INTEGER,
+    shift              TEXT NOT NULL,
+    flags              TEXT NOT NULL DEFAULT '[]',
+    check_in_event_id  TEXT,
+    check_out_event_id TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_worker_sessions_worker_start ON worker_sessions (worker_id, session_start);

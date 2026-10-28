@@ -375,7 +375,7 @@ def test_every_simulator_message_passes_validation() -> None:
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        assert publisher.main(["--dry-run", "--speed", "1e9", "--duration-h", "1", "--start",
+        assert publisher.main(["--dry-run", "--no-align-shifts", "--speed", "1e9", "--duration-h", "1", "--start",
                                "2026-10-28T05:30:00", "--outage-start-min", "10",
                                "--outage-duration-min", "5"]) == 0
     watermark = None
