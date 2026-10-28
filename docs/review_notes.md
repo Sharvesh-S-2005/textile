@@ -161,3 +161,244 @@ by the Z1 node. That is the leakage the backend must resolve.
   rules, `rejected_records` table, dedup on `(device_id, ts, topic)`, LWT form)
 - Then the exposure engine (`exposure/`), ML, API, dashboard, ESP32 firmware stub,
   and `scripts/run_all.sh`.
+
+---
+
+## Day 2 — Contract v1.1, database, ingest path, BLE zone resolution (2026-10-28)
+
+### What was built
+
+| Module | What it does |
+|---|---|
+| `docs/data_contract.md` v1.1 | Five agreed amendments (changelog at the end): `ts` optional on offline status (LWT); UUID v4 `event_id` on RFID/PPE with dedup on it; validation constants documented in §10; machine-node sensor faults; India noise criterion confirmed. `schema_version` is `"1.1"` everywhere. |
+| `config.yaml` | India: 90 dBA / 8 h / 5 dB exchange rate, `threshold_db: 90`, `absolute_max_db: 115`, source Schedule XXVIII, Rule 95, TN Factories Rules (OSH Code 2020 to be re-checked). NIOSH `threshold_db: 80`. New `localisation`, `sessions`, `ingest` blocks. |
+| `db/schema.sql`, `db/repo.py`, `db/init_db.py` | SQLite in WAL mode with foreign keys and `busy_timeout`. Typed columns, NULL kept for null readings. Telemetry is unique on `(device_id, ts, topic)`, events on `event_id`, rejections on `(topic, sha256)`. `INSERT OR IGNORE` everywhere; reads ordered by `ts`. **All SQL is in `db/repo.py`** (enforced by a test). |
+| `ingest/validation.py` | Pure checks for contract §10. Closed enums: 13 rejection reasons and 4 flags. |
+| `ingest/subscriber.py` | MQTT → validate → batch → commit → ack. Persistent session with manual acks after commit, a savepoint per message, ring buffers for stuck/spike, reconnect with backoff, clean shutdown. |
+| `ingest/localisation.py` | BLE sightings → merged zone intervals (`ble_ewma_hysteresis`), run as a separate pass. |
+| `ingest/sessions.py` | Gate events → sessions with explicit flags; assignments clipped to sessions. |
+| `shifts.py` | The shift calendar, moved from `simulator/schedule.py` so the backend can use it without importing simulator code. |
+| `simulator/` | Machine-node faults (`faults.py`), silent stuck/glitch failures on zone sensors, same-second gate pairs, outages on any device (`--extra-outage`), `--ground-truth-out`. |
+| `scripts/` | `score_localisation.py`, `sweep_localisation.py`, `inject_bad_records.py`, `replay_capture.py`. |
+
+### Design decisions taken with the reviewer in mind
+
+- **Time reference for future/late checks** (agreed): at `--speed 100` simulated
+  `ts` is hours away from the wall clock, so `--time-reference stream` uses the
+  newest accepted telemetry/event `ts` as "now". Real hardware uses `wall` (the
+  default). Retained messages never advance the watermark. *Limitation:* in
+  stream mode the first record is judged against its own `ts`.
+- **Every rejection reason and flag fires in a real run, without polluting the
+  data** (agreed). Flags come from realistic failures in the simulator: sensor
+  faults, *stuck* sensors and single-reading *glitches* (both with flag `ok`), and
+  a 2.5 h outage on machine node M8. Rejections come from
+  `scripts/inject_bad_records.py`, whose records are all rejected and all carry an
+  `injected_by` marker. Nothing injected reaches the main tables.
+- **Zero-loss delivery:** a QoS 1 message is acknowledged only after the batch
+  holding it is committed, so a crash means redelivery, which dedup absorbs.
+  *Found in a real-broker smoke test:* Mosquitto stops delivering after
+  `max_inflight_messages` (20) unacked messages, which capped ingest at ~19 msg/s.
+  The backlog then exceeded `max_queued_messages` and the broker **dropped**
+  messages. Fix: also commit once 20 QoS 1 messages are waiting (`max_unacked`).
+- **Sessions:** both inferred cases are symmetric and flagged. An unmatched
+  check-in ends at its shift end; an orphan check-out starts at its shift start.
+  (The first rule here, "an orphan covers nothing", erased the real end of the
+  night shift when data starts mid-shift: 381 on-site windows became UNKNOWN.
+  Under-reporting exposure is the unsafe direction, so it was changed.)
+
+### Commands
+
+```bash
+python -m db.init_db --reset
+python -m ingest.subscriber --time-reference stream --idle-exit-s 20
+python -m simulator.publisher --speed 100 --duration-h 8 --start 2026-10-28T05:30:00 \
+    --ground-truth-out data/truth.jsonl --extra-outage MN-M8:60:150
+python scripts/inject_bad_records.py          # mid-run
+python -m ingest.localisation
+python -m ingest.sessions
+python scripts/score_localisation.py --truth data/truth.jsonl
+python scripts/sweep_localisation.py --truth data/truth.jsonl
+mosquitto_sub -t "textile/#" -v -q 1 > data/capture.txt     # during the run
+python scripts/replay_capture.py --capture data/capture.txt # idempotency
+```
+
+Before a measured run, clear retained `textile/status/*` messages and purge the
+ingest client's persistent session, so earlier runs cannot leak in.
+
+### Measured results (run 3: 8 h shift at --speed 100, seed 42, start 05:30 IST)
+
+**Run history, reported honestly.** Run 1 exposed an injector bug: its
+"11 minutes ahead" record arrived inside the tolerance at 100× speed, was
+*accepted*, and displaced one real reading as a duplicate. Fix: date it a day
+ahead. Run 2 was clean, but its idempotency replay exposed a watermark bug:
+duplicates did not advance the watermark, so a replay judged the far-future
+record against itself and stored it. Fix: duplicates advance the watermark. Run 3
+is the final run below. Runs 1 and 2 are kept in `data/run1_invalid/` and
+`data/run2_superseded/` (not committed; `data/` is git-ignored).
+
+**Data loss: 0 — published = stored + rejected, exactly.**
+
+| | Messages |
+|---|---|
+| Published by simulator (env 20,130 + BLE 6,710 + machine 22,140 + RFID 13 + PPE 8 + status 38 + replayed after outages 940) | 49,979 |
+| Injected invalid records | 13 |
+| **Received by ingest** | **49,992** |
+| Stored (new rows) | 49,979 |
+| Rejected | 13 |
+| Duplicates / processing errors | 0 / 0 |
+
+Rows per table: `zone_env` 20,160, `ble_scans` 6,720 (13,927 sightings),
+`machine_status` 23,040, `gate_events` 13, `ppe_entries` 8, `device_status` 38,
+`rejected_records` 13.
+
+**Ingest throughput:** 49,992 messages over 287.9 s of wall time =
+**173.6 msg/s sustained**. 30-s intervals ranged 162–201 msg/s (the peak is the
+M8 replay burst). The ingest queue was empty at every stats line, i.e. ingest
+kept up with the publisher throughout.
+
+**Validation results.**
+
+| Rejection reason | Count | Flag | Count |
+|---|---|---|---|
+| malformed_json | 1 | sensor_not_ok | 224 |
+| unknown_topic | 1 | stuck_value | 171 |
+| not_an_object | 1 | late_upload | 180 |
+| schema_version | 1 | spike | 20 |
+| missing_field | 1 | **flagged records** | **595** (env 313, machine 282) |
+| wrong_type | 1 | | |
+| bad_ts | 1 | | |
+| topic_mismatch | 1 | | |
+| out_of_range | 1 | | |
+| invalid_enum | 1 | | |
+| null_with_ok_flag | 1 | | |
+| invalid_event_id | 1 | | |
+| future_ts | 1 | | |
+
+All 13 rejected rows carry the injector marker. The deliberately faulty sensors
+appear: machine-node `stale`/`error` (contract v1.1d) and zone faults, both under
+`sensor_not_ok`. `late_upload` is exactly M8's first 180 buffered readings
+(01:00:00–01:29:50Z, more than 2 h old when replayed at 03:30Z). The **same-second
+gate pair** appears as W101 and W102 at `2026-10-28T00:26:48Z`, with two distinct
+`event_id`s, both stored.
+
+**Idempotency:** replaying all 49,992 captured messages into the same database gave
+49,979 duplicates and 13 rejected-duplicates. **Every table's row count is
+unchanged.**
+
+**Outage handling (Z3, 01:30–01:35Z):** all 30 env readings are present with their
+**original `ts`** (01:30:00–01:34:50Z). Across the stream they are exactly the 30
+rows (and the only ones, 01:25–01:40Z) that arrived after rows with a later `ts`.
+For example, Z1's live 01:35:00Z reading was received before Z3's replayed
+01:32:20Z reading. The node's retained status announced
+`buffered_records: 40` (30 env + 10 BLE) on reconnect at 01:35:00Z, and 0 at
+01:35:10Z.
+
+**Localisation accuracy** (`scripts/score_localisation.py`, ground truth from the
+simulator; it never touches MQTT or the database):
+
+| Metric | Raw assignments | Clipped to sessions |
+|---|---|---|
+| **On-site worker-minutes in the correct zone** | **96.4%** (7,690 windows) | **96.4%** |
+| Accuracy incl. off-site (off-site correct only if UNKNOWN) | 98.5% | 98.6% |
+| Correctly UNKNOWN (really off site) | 11,495 | 11,510 |
+| Incorrectly UNKNOWN (on site) | 14 | 14 |
+| Off-site windows given a zone | 15 | **0** |
+| Zone-change latency (n=173) | mean 45.8 s, median 30 s, p90 90 s | same |
+| Exit latency to UNKNOWN (n=5) | 90 s | 0 s (session end) |
+| True changes never followed | 3 | 3 |
+
+Per-zone recall: Z1 95.7%, Z2 95.1%, Z3 94.4%, Z4 96.2%, Z5 98.3%, **Z6 92.5%
+(lowest)**, Z7 97.4%. Parameters: `ewma_alpha 0.5`, `rssi_margin_db 6`,
+`debounce_windows 2`, `absence_windows 4`, `min_rssi_dbm -95`, `window_s 30`.
+
+Confusion matrix (raw; rows = true, columns = predicted):
+
+```text
+           UNKNOWN       Z1       Z2       Z3       Z4       Z5       Z6       Z7
+ OFF_SITE    11495        0        0        0        0        0        0       15
+       Z1        1      781       29        0        0        0        0        5
+       Z2        1       25      821       12        0        0        0        4
+       Z3        0        1       15      804       28        0        0        4
+       Z4        0        0        0       35     1514       14        0       10
+       Z5        2        0        0        0       12     1636        8        7
+       Z6        2        0        0        0        0       11      245        7
+       Z7        8        4        4        3        6        5       13     1613
+```
+
+Every error is between **adjacent** zones (the layout is a chain, Z1–Z7). About
+95% of the wrong windows are **transition latency**: 173 changes × 45.8 s ≈ 264 of
+the 277 wrong windows. Steady-state misclassification is rare. Z6 has the lowest
+recall because its workers make short trips: the 30–60 s debounce latency is a
+larger share of a short visit. The 15 off-site windows given a zone are workers at
+the gate, assigned to Z7 before check-in or after check-out; **session clipping
+removes all of them**. That is the purpose of the clip, and the number to quote.
+
+**Parameter sensitivity** (`scripts/sweep_localisation.py`, one parameter at a time):
+
+| Parameter | Value | Accuracy (on site) | Wrong UNKNOWN | Off-site → zone | Latency median / p90 | Missed | Zone changes* |
+|---|---|---|---|---|---|---|---|
+| baseline | | 96.4% | 14 | 15 | 30 / 90 s | 3 | 182 |
+| ewma_alpha | 0.3 | 94.4% | 14 | 15 | 90 / 120 s | 5 | 181 |
+| ewma_alpha | 0.8 | 97.2% | 16 | 15 | 30 / 30 s | 2 | 192 |
+| ewma_alpha | 1.0 | 97.1% | 16 | 15 | 30 / 30 s | 2 | 191 |
+| rssi_margin_db | 0 | 96.9% | 14 | 15 | 30 / 60 s | 2 | 194 |
+| rssi_margin_db | 3 | 96.7% | 14 | 15 | 30 / 60 s | 3 | 185 |
+| rssi_margin_db | 9 | 95.9% | 14 | 15 | 60 / 90 s | 4 | 181 |
+| debounce_windows | 1 | 98.6% | 0 | 15 | 0 / 30 s | 0 | **223** |
+| debounce_windows | 3 | 94.0% | 27 | 15 | 60 / 120 s | 4 | 181 |
+| absence_windows | 2 | 96.4% | 16 | 5 | 30 / 90 s | 3 | 184 |
+| absence_windows | 6 | 96.4% | 14 | 25 | 30 / 90 s | 3 | 182 |
+
+\*Interval boundaries across all workers. The true number of changes is about 181.
+
+**Interpretation, and why the defaults were not changed.** Lighter filtering scores
+higher here, e.g. `debounce_windows=1` reaches 98.6%. But it produces **223 zone
+changes against ~181 real ones**: about 40 spurious flaps, the oscillation the
+algorithm exists to suppress, and a flapping assignment splits a worker's exposure
+across zones. The accuracy metric rewards responsiveness because the simulated
+RSSI is clean (true zone ≈ −65 dBm, neighbours ≈ −83 dBm, ~18 dB apart). A real
+mill full of metal machinery will be worse. Choosing the best row would also
+select parameters on the data being scored. So the physically-motivated defaults
+stay, and **re-tuning is deferred to hardware calibration walks**. Stated as a
+limitation: on simulated data the localisation is good, its main cost is 30–90 s
+latency at zone changes, and its real-world accuracy is untested.
+
+### Integrity checks (all enforced by tests)
+
+- Ground truth: written only by `--ground-truth-out` to a local file. No backend
+  module mentions it, the publisher emits the same messages with or without the
+  flag, and no table has a column for it.
+- No module in `ingest/`, `db/`, `exposure/`, `ml/`, `api/`, `dashboard/` or
+  `scripts/` imports `simulator`.
+- No SQL outside `db/repo.py`.
+- Every zone assignment is labelled `estimated_personal`, with
+  `method = ble_ewma_hysteresis` and its parameters stored per row.
+
+### Known limitations and open points
+
+- Every shift-A session in this run is flagged `unmatched_check_in`, because the
+  run ends at 13:30 IST, before 14:00. Every shift-C session is
+  `orphan_check_out`, because it started before 05:30. Both are artefacts of the
+  run window, closed by the inferred shift boundaries and visibly flagged.
+- Stream-mode bootstrap: the first telemetry record seeds the watermark (see
+  above). Wall mode, which real hardware uses, has no such caveat.
+- `ts` is stored exactly as published and sorted as text. That is correct for the
+  contract's whole-second format, but a device sending fractional seconds would
+  sort incorrectly against whole-second strings. Validation accepts fractions;
+  worth tightening when the firmware is written.
+- Broker limits matter for zero loss: keep `ingest.max_unacked` ≤ Mosquitto's
+  `max_inflight_messages`, and size `max_queued_messages` for the longest expected
+  ingest downtime.
+- `simulator/profiles.py` still has its Day 1 built-in fault logic, which
+  duplicates `simulator/faults.SensorFaults`. It was left alone because it passes
+  its tests and the brief says not to refactor passing modules unasked.
+
+### Pending for Day 3 onward
+
+- Exposure engine (`exposure/noise.py`, `dust.py`, `heat.py`, `cumulative.py`)
+  using session-clipped `zone_assignments` (exclude `outside_session`), with NIOSH
+  and India doses side by side. The India dose uses the 90 dBA threshold, and
+  115 dBA is a hard alarm.
+- ML forecasting (Task A), risk scoring (Task B), SHAP, API, dashboard with the
+  `SIMULATED DATA` badge, ESP32 firmware stub, `scripts/run_all.sh`.
+- Localisation tuning on real hardware (calibration walks).

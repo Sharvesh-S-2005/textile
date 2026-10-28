@@ -48,7 +48,23 @@ python -m simulator.publisher --speed 100 --duration-h 8
 mosquitto_sub -h localhost -t "textile/#" -v
 ```
 
-## 5. Run the tests
+## 5. Ingest into SQLite, resolve zones, score
+
+```bash
+python -m db.init_db                                   # create data/textile_ohs.db
+# Start ingest first; "stream" time reference is for accelerated/replayed data
+# (real hardware uses the default, wall clock):
+python -m ingest.subscriber --time-reference stream --idle-exit-s 20
+# Then, in another terminal:
+python -m simulator.publisher --speed 100 --duration-h 8 --start 2026-10-28T05:30:00 \
+    --ground-truth-out data/truth.jsonl
+# After it finishes:
+python -m ingest.localisation                          # BLE sightings -> zone intervals
+python -m ingest.sessions                              # gate events -> sessions, clip
+python scripts/score_localisation.py --truth data/truth.jsonl
+```
+
+## 6. Run the tests
 
 ```bash
 pytest
