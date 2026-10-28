@@ -64,7 +64,7 @@ ALL_TABLES: tuple[str, ...] = (
     "zone_env", "ble_scans", "ble_sightings", "machine_status", "gate_events",
     "ppe_entries", "device_status", "rejected_records", "zone_assignments",
     "worker_sessions", "personal_exposure_shift", "personal_exposure_cumulative",
-    "zone_exposure_summary",
+    "zone_exposure_summary", "worker_risk_index",
 )
 
 # Materialised exposure tables: the date column a recompute replaces by, the JSON
@@ -78,6 +78,11 @@ EXPOSURE_TABLES: dict[str, dict[str, Any]] = {
     },
     "personal_exposure_cumulative": {
         "date_col": "as_of_date", "order": "worker_id, window_days", "json": ("params",), "bool": ("partial",),
+    },
+    "worker_risk_index": {
+        "date_col": "date", "order": "worker_id",
+        "json": ("components", "contributions", "drivers", "ppe_status", "weights", "params"),
+        "bool": ("insufficient_data",),
     },
     "zone_exposure_summary": {
         "date_col": "shift_date", "order": "zone_id, shift_start_ms",
@@ -586,6 +591,12 @@ class Repo:
         """(first ts, last ts) of zone_env telemetry - the period the system was collecting."""
         row = self._conn.execute("SELECT MIN(ts_epoch_ms), MAX(ts_epoch_ms) FROM zone_env").fetchone()
         return None if row[0] is None else (from_epoch_ms(row[0]), from_epoch_ms(row[1]))
+
+    def get_ppe_entries(self, start_ts: str, end_ts: str) -> list[dict[str, Any]]:
+        """PPE entries with start_ts <= ts < end_ts, in time order (display only, never a dose input)."""
+        return self._select(
+            "SELECT * FROM ppe_entries WHERE ts_epoch_ms >= ? AND ts_epoch_ms < ? ORDER BY ts_epoch_ms, event_id",
+            (to_epoch_ms(start_ts), to_epoch_ms(end_ts)))
 
     def get_rejected(self) -> list[dict[str, Any]]:
         """Every rejected record, ordered by arrival."""

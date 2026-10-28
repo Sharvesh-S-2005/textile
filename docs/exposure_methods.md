@@ -346,3 +346,46 @@ nearly every production-zone hour. That is plausible for a Tamil Nadu mill at
 **Cumulative windows** (as of 2026-10-26). Every 7-day window has
 `window_coverage_pct` 100%. Every 30-day window reports **23.33%, `partial = true`**,
 with totals equal to the 7-day totals: never scaled up.
+
+---
+
+## 8. Deterministic risk index (`exposure/risk_index.py`)
+
+> **The weights and ramps are a design choice of this project, not a validated
+> clinical model.** The index orders exposure situations. It does not estimate the
+> probability of any health outcome, and it diagnoses nothing. Its label is
+> `deterministic_index`, not `predicted_risk`: nothing is predicted or trained.
+
+| Component (0–100) | From | Normalisation |
+|---|---|---|
+| Hearing | Day's noise dose and 7-day mean daily dose, taking the higher of NIOSH and India | ½·today + ½·7-day mean, as % of the daily allowance; **100% dose → 100**, capped (saturates above 100%) |
+| Heat | WBGT maximum; hours above the ISO 7243 reference (28 °C, moderate work) | Mean of two ramps: WBGT 26 → 34 °C maps to 0 → 100; 0 → 4 h above maps to 0 → 100 |
+| Respiratory | PM2.5 TWA, PM10 TWA, 7-day PM2.5 TWA-hours | **Cohort-relative**: mean percentile rank among that day's workers |
+
+`overall = Σ wᵢ·cᵢ / Σ wᵢ`, with equal weights by default (`config.yaml`). Each
+component's absolute and percentage contribution is stored (the percentages sum to
+100%), as are the top two drivers in plain language, the weights and the version.
+
+- **The respiratory component ranks workers against each other.** It is relative to
+  the cohort, not to a health threshold, because no regulatory anchor exists for
+  optical PM. A worker at rank 100 has the dustiest day *of this cohort*, which says
+  nothing about whether that level is safe. Of the three components, this is the
+  easiest to misread.
+- **Confidence** = `data_coverage_pct × (1 − unaccounted_pct/100)`. Below 80%, the
+  **band is suppressed** ("insufficient data") but the number is still shown.
+- **PPE is displayed alongside and never reduces the index**, nor any dose.
+- **Monotonic by construction, and tested.** Raising any single exposure input,
+  with the others and the cohort held fixed, never lowers any component or the
+  index (`test_index_is_monotonic_in_each_input_with_the_others_fixed`).
+- **Saturation.** On this dataset most worker-days exceed 100% NIOSH dose, so the
+  hearing component is often at its 100 cap. That reflects the exposure
+  honestly; it is not a modelling defect.
+
+**What the cap costs (7-day data).** Across the 140 worker-days the index runs from
+14.2 to 100 (median 83.5), with bands High 119, Medium 7, Low 14. Because hearing
+saturates at 100% dose, the index **cannot tell 2× the limit from 34×**. On
+2026-10-26, W102 (carding, 235% NIOSH) scores 98.2 and ranks *above* W105 (weaving,
+3,378%), because both hearing components sit at the cap and carding is the
+dustiest zone. The dose itself is always shown next to the index, and it is the
+figure to use for noise. A log-scaled hearing component would remove this
+ceiling; it is left as a documented design option rather than changed silently.

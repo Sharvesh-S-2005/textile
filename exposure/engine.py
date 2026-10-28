@@ -27,6 +27,7 @@ from typing import Any
 import config
 from db.repo import Repo, from_epoch_ms, to_epoch_ms
 from exposure.cumulative import daily_exposures, rolling_window
+from exposure.risk_index import RiskParams, compute_day, worker_day_inputs
 from exposure.personal import ExposureParams, Interval, compute_session_exposure, personal_exposure_for_session
 from ingest.localisation import run_localisation
 from ingest.sessions import run_sessions
@@ -171,7 +172,36 @@ def run_engine(repo: Repo, days: list[str], worker_id: str | None = None, recomp
         if not dry_run:
             repo.replace_exposure_rows("personal_exposure_cumulative", day, c_rows, worker_id)
             repo.commit()
+        fresh = [r for r in report["personal"] if r["shift_date"] == day]
+        r_rows = risk_rows(repo, day, c_rows, worker_id, fresh)
+        report["risk_rows"] = report.get("risk_rows", 0) + len(r_rows)
+        report.setdefault("risk", []).extend(r_rows)
+        if not dry_run:
+            repo.replace_exposure_rows("worker_risk_index", day, r_rows, worker_id)
+            repo.commit()
     return report
+
+
+def risk_rows(repo: Repo, day: str, cumulative: list[dict[str, Any]], worker_id: str | None,
+              fresh_shift_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """worker_risk_index rows for `day` from the shift rows just computed (stored rows are
+    used only for workers not recomputed in this run). The respiratory cohort is always
+    the whole day's workforce, even with --worker (only that worker's row is returned)."""
+    params = RiskParams.from_config(config.get_risk_index_config(), config.get_exposure_limits()["wbgt_limit_c"])
+    recomputed = {r["worker_id"] for r in fresh_shift_rows}
+    shift_rows = fresh_shift_rows + [r for r in repo.get_exposure_rows("personal_exposure_shift", day, day)
+                                     if r["worker_id"] not in recomputed]
+    cum7 = {r["worker_id"]: r for r in cumulative if r["window_days"] == 7}
+    if worker_id is not None:          # cumulative was computed for one worker only: fetch the rest
+        cum7 = {r["worker_id"]: r for r in repo.get_exposure_rows("personal_exposure_cumulative", day, day)
+                if r["window_days"] == 7} | cum7
+    ppe: dict[str, dict[str, Any]] = {}
+    for e in repo.get_ppe_entries(f"{day}T00:00:00Z", f"{(date.fromisoformat(day) + timedelta(days=1)).isoformat()}T00:00:00Z"):
+        ppe[e["worker_id"]] = {"hearing_ppe": e["hearing_ppe"], "respiratory_ppe": e["respiratory_ppe"],
+                               "recorded_by": e["recorded_by"], "ts": e["ts"],
+                               "note": "displayed only; never reduces the index or any dose"}
+    rows = compute_day(worker_day_inputs(shift_rows, cum7, ppe), params)
+    return [r for r in rows if worker_id is None or r["worker_id"] == worker_id]
 
 
 def format_summary(report: dict[str, Any]) -> str:

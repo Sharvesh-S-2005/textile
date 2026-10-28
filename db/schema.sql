@@ -348,3 +348,26 @@ CREATE TABLE IF NOT EXISTS zone_exposure_summary (
     UNIQUE (zone_id, shift_start_ms)
 );
 CREATE INDEX IF NOT EXISTS ix_zes_date ON zone_exposure_summary (shift_date);
+
+-- One row per worker per day: deterministic risk index (exposure/risk_index.py).
+-- label = 'deterministic_index' (nothing is predicted). The weights are a design
+-- choice of this project, not a validated clinical model; they are stored per row.
+CREATE TABLE IF NOT EXISTS worker_risk_index (
+    id                  INTEGER PRIMARY KEY,
+    worker_id           TEXT NOT NULL,
+    date                TEXT NOT NULL,
+    overall_index       REAL NOT NULL,
+    band                TEXT NOT NULL CHECK (band IN ('Low', 'Medium', 'High', 'insufficient data')),
+    insufficient_data   INTEGER NOT NULL CHECK (insufficient_data IN (0, 1)),
+    components          TEXT NOT NULL,   -- JSON: hearing / heat / respiratory, each 0-100
+    contributions       TEXT NOT NULL,   -- JSON: absolute and % share of the overall index
+    drivers             TEXT NOT NULL,   -- JSON: top two factors in plain language
+    confidence_pct      REAL NOT NULL,
+    ppe_status          TEXT NOT NULL,   -- JSON: displayed alongside, never reduces the index
+    label               TEXT NOT NULL CHECK (label = 'deterministic_index'),
+    weights             TEXT NOT NULL,
+    version             TEXT NOT NULL,
+    params              TEXT NOT NULL,
+    UNIQUE (worker_id, date)
+);
+CREATE INDEX IF NOT EXISTS ix_wri_date ON worker_risk_index (date);
