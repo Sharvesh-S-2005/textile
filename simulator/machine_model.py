@@ -58,6 +58,7 @@ class MachineModel:
         self._start_ts = start_ts
         self._lag = timedelta(seconds=float(rng.uniform(0.0, dynamics["stagger_max_s"])))
         self._on_since: datetime | None = None
+        self._first_reading = True
 
     @classmethod
     def from_config(
@@ -103,7 +104,8 @@ class MachineModel:
             standby = self._d["standby_current_a"]
             return abs(standby["mean"] + standby["sd"] * self._rng.standard_normal())
         if self._on_since is None:
-            self._on_since = ts
+            # Already running when the simulation starts: no start-up, so no inrush.
+            self._on_since = ts - timedelta(days=1) if self._first_reading else ts
         current = self._rated_a * (1.0 + self._d["current_noise_fraction"] * self._rng.standard_normal())
         inrush = self._d["inrush"]
         if (ts - self._on_since).total_seconds() < inrush["duration_s"]:
@@ -118,6 +120,7 @@ class MachineModel:
     def reading(self, ts: datetime) -> dict[str, Any]:
         """Return the measurement fields of a machine status payload at simulated `ts`."""
         current = self._current(ts, self.scheduled_on(ts))
+        self._first_reading = False
         running = current > self._d["running_threshold_fraction"] * self._rated_a
         if running:
             expected = self._baseline_vib * self.degradation_factor(ts)

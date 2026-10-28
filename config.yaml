@@ -7,7 +7,9 @@ mqtt:
   keepalive_s: 60
   qos: 1
   topic_prefix: textile
-  client_id_prefix: sim
+  # Field devices (and the simulator) use their device_id as client ID, per the
+  # data contract. This prefix is for backend clients such as the ingest subscriber.
+  client_id_prefix: ohs-backend
 
 simulation:
   schema_version: "1.0"
@@ -90,6 +92,21 @@ simulation:
       unknown_probability: 0.02
       record_delay_min: {min: 5, max: 30}   # supervisor round after shift start
     supervisors: {A: SUP-01, B: SUP-02, C: SUP-03}
+
+  # BLE sightings produced by the publisher from the workers' true zones.
+  # Tags are also heard by adjacent zone nodes (leakage); the backend must resolve it.
+  ble_model:
+    advert_interval_s: 1.0                 # tag advertises ~1 Hz
+    same_zone: {detect_probability: 0.97, rssi_dbm: {mean: -65, sd: 7}, seen_fraction: {min: 0.4, max: 0.9}}
+    adjacent_zone: {detect_probability: 0.5, rssi_dbm: {mean: -83, sd: 6}, seen_fraction: {min: 0.05, max: 0.3}}
+
+  # Network outage demo: one zone node goes offline, buffers to microSD, then
+  # replays with original timestamps. Overridable from the publisher command line.
+  outage:
+    enabled: true
+    zone_id: Z3
+    start_offset_min: 90           # simulated minutes after the run starts
+    duration_min: 5
 
 # Physical devices that are not zone or machine nodes.
 devices:

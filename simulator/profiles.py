@@ -166,9 +166,8 @@ class ZoneProfile:
         return value
 
     def _init_state(self, targets: dict[str, float]) -> None:
-        """Start every quantity at its target, except CO2 which starts at outdoor level."""
+        """Start every quantity at its current target (steady state for the current load)."""
         self._state = dict(targets)
-        self._state["co2"] = float(self._d["outdoor_co2_ppm"])
 
     def _step_noise(self, f: float, dt_s: float, target: float, sd: float) -> tuple[float, float]:
         """Return (noise_dba, noise_peak_dba) including any active transient."""

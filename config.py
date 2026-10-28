@@ -20,7 +20,7 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
     "simulation": [
         "schema_version", "env_interval_s", "ble_interval_s", "machine_interval_s",
         "speed_factor", "random_seed", "firmware_tag", "zone_dynamics",
-        "machine_dynamics", "worker_dynamics",
+        "machine_dynamics", "worker_dynamics", "ble_model", "outage",
     ],
     "shifts": ["timezone", "definitions"],
     "exposure_limits": [

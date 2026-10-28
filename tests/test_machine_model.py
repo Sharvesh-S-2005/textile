@@ -89,8 +89,16 @@ def test_running_current_near_rated(schedule: ShiftSchedule) -> None:
 def test_inrush_spike_at_start_up(schedule: ShiftSchedule) -> None:
     m = _machine("M2", schedule)  # rated 24 A
     rows = _run(m, SHIFT_A_START, 120)  # covers the 10-minute changeover and start-up
-    first_on = next(r for _, r in rows if r["running"])
+    first_on = next(cur for (_, prev), (_, cur) in zip(rows, rows[1:])
+                    if cur["running"] and not prev["running"])
     assert first_on["current_a"] > 2.0 * 24.0
+
+
+def test_no_inrush_when_already_running_at_simulation_start(schedule: ShiftSchedule) -> None:
+    start = SHIFT_A_START + timedelta(hours=1)
+    m = _machine("M2", schedule, start=start)
+    r = m.reading(start)
+    assert r["running"] and r["current_a"] < 24.0 * 1.15
 
 
 def _mean_running_vib(m: MachineModel, start: datetime) -> float:

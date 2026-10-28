@@ -104,10 +104,13 @@ class WorkerModel:
         self.rfid_events: list[RfidEvent] = []
         self.ppe_events: list[PpeEvent] = []
 
+        # Widen the query so a shift ending at `start` (its check-out) and one starting
+        # just after `end` (its check-in) are both included.
+        margin = timedelta(hours=12)
         child_rngs = rng.spawn(len(workers))
         for worker, w_rng in zip(workers, child_rngs):
             segments: list[Segment] = []
-            for shift in schedule.instances_between(start, end, worker["shift"]):
+            for shift in schedule.instances_between(start - margin, end + margin, worker["shift"]):
                 segments.extend(self._shift_timeline(worker, shift, w_rng))
             self.timelines[worker["worker_id"]] = _merge(segments)
         self._starts = {wid: [s.start for s in segs] for wid, segs in self.timelines.items()}
