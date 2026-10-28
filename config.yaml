@@ -355,6 +355,12 @@ localisation:
   # confidence = clip((assigned - runner_up) / this, 0, 1); 1.0 at twice the margin.
   confidence_full_margin_db: 12.0
 
+# ingest/sessions.py - shift sessions from gate events.
+sessions:
+  # Longest plausible on-site session: an 8 h shift plus the longest configured
+  # overtime (3 h) plus generous slack. Longer sessions are flagged, not dropped.
+  max_session_h: 14
+
 # ingest/subscriber.py
 ingest:
   client_id_suffix: ingest       # client ID = mqtt.client_id_prefix + "-" + this

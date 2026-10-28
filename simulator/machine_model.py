@@ -25,7 +25,7 @@ import numpy as np
 
 import config
 from simulator.faults import SensorFaults
-from simulator.schedule import ShiftSchedule
+from shifts import ShiftSchedule
 
 CHANNELS: tuple[str, ...] = ("current", "vibration")
 

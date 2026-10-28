@@ -23,7 +23,8 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any, Protocol, TextIO
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -32,7 +33,7 @@ import paho.mqtt.client as mqtt
 import config
 from simulator.machine_model import MachineModel
 from simulator.profiles import ZoneProfile
-from simulator.schedule import ShiftSchedule
+from shifts import ShiftSchedule
 from simulator.worker_model import WorkerModel
 
 log = logging.getLogger("simulator.publisher")
@@ -254,10 +255,22 @@ class Simulation:
 
     # ----------------------------------------------------------- run loop
 
-    def run(self, sink: Sink, speed: float) -> None:
+    def ground_truth_rows(self, ts: datetime) -> list[dict[str, Any]]:
+        """True zone of every worker at `ts` (None = off site), for scoring only.
+
+        This is simulator-only knowledge. It is written to a local file and must
+        never be published over MQTT or stored in the backend database.
+        """
+        zones = self.workers.zones_at(ts)
+        return [{"ts": iso_z(ts), "worker_id": wid, "tag_id": self.workers.tag_id(wid),
+                 "zone_id": zones.get(wid)} for wid in sorted(self.workers.timelines)]
+
+    def run(self, sink: Sink, speed: float, ground_truth: TextIO | None = None) -> None:
         """Publish the whole window, pacing wall-clock time at `speed` x simulated time.
 
-        Ctrl-C stops the run early; every device still publishes `online: false`.
+        If `ground_truth` is given, one JSON line per worker is written to it at every
+        BLE scan tick with the worker's true zone. Ctrl-C stops the run early; every
+        device still publishes `online: false`.
         """
         sim = self.sim
         tick_s = math.gcd(sim["env_interval_s"], sim["ble_interval_s"], sim["machine_interval_s"])
@@ -324,6 +337,9 @@ class Simulation:
                 if elapsed_s % sim["ble_interval_s"] == 0:
                     for topic, payload in self.ble_messages(ts):
                         send(payload["device_id"], topic, payload, "ble")
+                    if ground_truth is not None:
+                        for row in self.ground_truth_rows(ts):
+                            ground_truth.write(json.dumps(row) + "\n")
 
                 if ts >= next_summary:
                     self._log_summary(ts, counts, wall_start)
@@ -401,6 +417,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="simulated minutes after start when the outage begins")
     p.add_argument("--outage-duration-min", type=float, default=float(outage["duration_min"]))
     p.add_argument("--no-outage", action="store_true", help="disable the outage demo")
+    p.add_argument("--ground-truth-out", type=Path, default=None,
+                   help="write each worker's TRUE zone per BLE window to this JSONL file "
+                        "(for scoring localisation; never published, never stored in the DB)")
     args = p.parse_args(argv)
     if args.speed <= 0:
         p.error("--speed must be positive")
@@ -437,7 +456,13 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     log.info("simulating %s -> %s at speed %gx (seed %d)",
              iso_z(simulation.start), iso_z(simulation.end), args.speed, args.seed)
-    simulation.run(sink, args.speed)
+    if args.ground_truth_out is None:
+        simulation.run(sink, args.speed)
+    else:
+        args.ground_truth_out.parent.mkdir(parents=True, exist_ok=True)
+        with args.ground_truth_out.open("w", encoding="utf-8") as truth:
+            simulation.run(sink, args.speed, truth)
+        log.info("ground truth written to %s", args.ground_truth_out)
     return 0
 
 

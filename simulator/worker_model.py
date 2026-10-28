@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 
 import config
-from simulator.schedule import ShiftInstance, ShiftSchedule
+from shifts import ShiftInstance, ShiftSchedule
 
 
 @dataclass(frozen=True)

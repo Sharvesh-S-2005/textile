@@ -14,7 +14,7 @@ Running log of what is built and what is pending. All data in this phase is
 | Skeleton | Package layout from `CLAUDE.md`, `.gitignore`, `requirements.txt` (plus `tzdata`, needed by `zoneinfo` on Windows), `README.md`. `ingest/`, `db/`, `exposure/`, `ml/`, `api/`, `dashboard/` are empty packages - **not built yet**. |
 | `config.yaml` | Single source of truth: MQTT, simulation intervals and seed, 7 zones with hazard profiles, 8 machines (M5 degrading), 20 workers, 3 shifts with breaks, NIOSH and India noise criteria, WBGT moderate-work limit, validation ranges and spike thresholds, simulator dynamics, zone adjacency. |
 | `config.py` | Loads `config.yaml` once and checks every required key. Missing keys raise `ConfigError`, never a silent default. Typed accessors (`get_zones()`, `get_workers()`, ...). |
-| `simulator/schedule.py` | Shift and break calendar in UTC from the local (Asia/Kolkata) times in config, including shift C crossing midnight. Shared by the machine and worker models. |
+| `simulator/schedule.py` (moved to `shifts.py` on Day 2, so the backend can use it without importing simulator code) | Shift and break calendar in UTC from the local (Asia/Kolkata) times in config, including shift C crossing midnight. Shared by the machine and worker models. |
 | `simulator/profiles.py` | Zone hazard model: noise, PM2.5/PM10, temperature, RH, globe temperature, CO2 for one zone at one instant. |
 | `simulator/machine_model.py` | Clamp-meter current and vibration per machine. Exposes `noise_energy_factor()` for the zone noise coupling. |
 | `simulator/worker_model.py` | Each worker's true zone over time, RFID check-in/out events and PPE entries. |

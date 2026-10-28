@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import config
-from simulator.schedule import ShiftSchedule
+from shifts import ShiftSchedule
 from simulator.worker_model import WorkerModel
 
 UTC = timezone.utc

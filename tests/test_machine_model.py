@@ -8,7 +8,7 @@ import pytest
 
 import config
 from simulator.machine_model import MachineModel
-from simulator.schedule import ShiftSchedule
+from shifts import ShiftSchedule
 
 UTC = timezone.utc
 SHIFT_A_START = datetime(2026, 10, 28, 0, 30, tzinfo=UTC)   # 06:00 IST

@@ -62,13 +62,13 @@ textile-ohs/
 |-- DAY_1.md, DAY_2.md          # task briefs - follow the current one
 |-- requirements.txt
 |-- config.py                   # loader for config.yaml (raises on missing keys)
+|-- shifts.py                   # shift and break calendar (simulator AND backend)
 |-- config.yaml                 # single source of truth: zones, workers, machines, limits
 |-- docs/
 |   |-- data_contract.md        # MQTT topics + JSON schema - AUTHORITATIVE
 |   |-- exposure_methods.md     # formulas, standards, worked examples
 |   +-- review_notes.md         # running log of what is built, for the review
 |-- simulator/
-|   |-- schedule.py             # shift and break calendar (shared by the models)
 |   |-- faults.py               # sensor-fault episodes for machine nodes
 |   |-- profiles.py             # per-zone hazard distributions
 |   |-- worker_model.py         # shifts, zone movement, breaks, PPE
@@ -77,6 +77,7 @@ textile-ohs/
 |-- ingest/
 |   |-- subscriber.py           # MQTT -> validate -> db.repo
 |   |-- localisation.py         # BLE sightings -> worker zone intervals (separate pass)
+|   |-- sessions.py             # gate events -> worker sessions; clips assignments
 |   +-- validation.py           # range, stuck-value, spike, staleness checks
 |-- db/
 |   |-- schema.sql

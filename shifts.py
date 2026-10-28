@@ -1,4 +1,4 @@
-"""Shift and break calendar shared by the machine and worker models.
+"""Shift and break calendar for the mill (shared by the simulator and the backend).
 
 Shift times in config.yaml are local (Asia/Kolkata); everything returned here is
 timezone-aware UTC.

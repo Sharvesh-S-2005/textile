@@ -35,6 +35,7 @@ _REQUIRED_SECTIONS: dict[str, list[str]] = {
         "method", "window_s", "ewma_alpha", "rssi_margin_db", "debounce_windows",
         "absence_windows", "min_rssi_dbm", "missing_rssi_dbm", "confidence_full_margin_db",
     ],
+    "sessions": ["max_session_h"],
     "ingest": [
         "client_id_suffix", "clean_session", "batch_size", "batch_interval_s", "max_unacked",
         "queue_poll_s",
@@ -184,6 +185,11 @@ def get_adjacency() -> dict[str, list[str]]:
 def get_localisation_config() -> dict[str, Any]:
     """Return the `localisation` section (BLE zone-resolution parameters)."""
     return get_config()["localisation"]
+
+
+def get_sessions_config() -> dict[str, Any]:
+    """Return the `sessions` section (worker session building)."""
+    return get_config()["sessions"]
 
 
 def get_ingest_config() -> dict[str, Any]:
