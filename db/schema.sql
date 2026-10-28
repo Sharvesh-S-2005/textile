@@ -224,3 +224,123 @@ CREATE TABLE IF NOT EXISTS worker_sessions (
     check_out_event_id TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_worker_sessions_worker_start ON worker_sessions (worker_id, session_start_ms);
+
+-- ---------------------------------------------------------------- exposure (materialised)
+-- Written by exposure/engine.py. Every row stores the engine version and the
+-- parameters used, so a value computed under different assumptions stays
+-- identifiable. Recomputing a date replaces that date's rows only. No computed_at
+-- column: rows are a pure function of their inputs, so a recompute is identical.
+-- `shift_date` is the UTC date of the session/shift start; for this mill's shift
+-- times (06:00/14:00/22:00 IST = 00:30/08:30/16:30 UTC) it equals the local date.
+
+-- One row per worker per session (exposure/personal.py result fields).
+CREATE TABLE IF NOT EXISTS personal_exposure_shift (
+    id                      INTEGER PRIMARY KEY,
+    worker_id               TEXT NOT NULL,
+    shift_date              TEXT NOT NULL,
+    shift                   TEXT NOT NULL,
+    session_start           TEXT NOT NULL,
+    session_end             TEXT NOT NULL,
+    session_start_ms        INTEGER NOT NULL,
+    session_end_ms          INTEGER NOT NULL,
+    session_duration_s      REAL NOT NULL,
+    session_flags           TEXT NOT NULL,     -- JSON: flags of the gate session itself
+    l_aeq_db                REAL,              -- NULL = not computable, never 0
+    l_ex_8h_db              REAL,
+    dose_niosh_pct          REAL,
+    dose_india_pct          REAL,
+    absolute_max_events     TEXT NOT NULL,     -- JSON list
+    pm25_twa_raw            REAL,              -- indicative (optical PM)
+    pm25_twa_corrected      REAL,
+    pm10_twa_raw            REAL,
+    pm10_twa_corrected      REAL,
+    wbgt_max_c              REAL,              -- approximate (see wbgt_t_nw_method)
+    wbgt_time_above_limit_s REAL,
+    co2_twa_ppm             REAL,
+    data_coverage_pct       REAL,
+    coverage_by_metric      TEXT NOT NULL,     -- JSON
+    accounted_time_s        REAL NOT NULL,
+    exposure_duration_s     REAL NOT NULL,
+    unaccounted_time_s      REAL NOT NULL,
+    unaccounted_pct         REAL NOT NULL,
+    zones_visited           TEXT NOT NULL,     -- JSON zone -> seconds
+    flags                   TEXT NOT NULL,     -- JSON result flags
+    label                   TEXT NOT NULL CHECK (label = 'estimated_personal'),
+    measured_personal       TEXT,              -- JSON; wearable path, never merged into the above
+    dust_label              TEXT NOT NULL,
+    wbgt_t_nw_method        TEXT NOT NULL,
+    wbgt_approximate        INTEGER NOT NULL CHECK (wbgt_approximate IN (0, 1)),
+    wbgt_metabolic_category TEXT NOT NULL,
+    criteria_sources        TEXT NOT NULL,     -- JSON
+    engine_version          TEXT NOT NULL,
+    params                  TEXT NOT NULL,     -- JSON
+    UNIQUE (worker_id, session_start_ms)
+);
+CREATE INDEX IF NOT EXISTS ix_pes_date ON personal_exposure_shift (shift_date);
+CREATE INDEX IF NOT EXISTS ix_pes_worker ON personal_exposure_shift (worker_id, session_start_ms);
+
+-- One row per worker per as-of date per rolling window (7 and 30 days).
+CREATE TABLE IF NOT EXISTS personal_exposure_cumulative (
+    id                          INTEGER PRIMARY KEY,
+    worker_id                   TEXT NOT NULL,
+    as_of_date                  TEXT NOT NULL,
+    window_days                 INTEGER NOT NULL,
+    window_start_date           TEXT NOT NULL,
+    window_coverage_pct         REAL NOT NULL,   -- window days inside the data period
+    partial                     INTEGER NOT NULL CHECK (partial IN (0, 1)),
+    days_worked                 INTEGER NOT NULL,
+    days_without_data           INTEGER NOT NULL,
+    cumulative_dose_niosh_pct   REAL,
+    cumulative_dose_india_pct   REAL,
+    mean_daily_l_ex_8h_db       REAL,            -- energy mean, never arithmetic
+    max_daily_l_ex_8h_db        REAL,
+    pm25_twa_hours_raw          REAL,            -- ug.h/m3, indicative
+    pm25_twa_hours_corrected    REAL,
+    pm10_twa_hours_raw          REAL,
+    pm10_twa_hours_corrected    REAL,
+    wbgt_hours_above_limit      REAL,
+    days_dose_niosh_over_100    INTEGER NOT NULL,
+    days_dose_india_over_100    INTEGER NOT NULL,
+    mean_data_coverage_pct      REAL,
+    mean_unaccounted_pct        REAL,
+    label                       TEXT NOT NULL CHECK (label = 'estimated_personal'),
+    engine_version              TEXT NOT NULL,
+    params                      TEXT NOT NULL,
+    UNIQUE (worker_id, as_of_date, window_days)
+);
+CREATE INDEX IF NOT EXISTS ix_pec_date ON personal_exposure_cumulative (as_of_date);
+
+-- One row per zone per shift instance (heat map; avoids recomputing from raw).
+CREATE TABLE IF NOT EXISTS zone_exposure_summary (
+    id                      INTEGER PRIMARY KEY,
+    zone_id                 TEXT NOT NULL,
+    shift_date              TEXT NOT NULL,
+    shift                   TEXT NOT NULL,
+    shift_start             TEXT NOT NULL,
+    shift_end               TEXT NOT NULL,
+    shift_start_ms          INTEGER NOT NULL,
+    shift_end_ms            INTEGER NOT NULL,
+    l_aeq_db                REAL,
+    l_ex_8h_db              REAL,
+    dose_niosh_pct          REAL,      -- for someone present the whole shift
+    dose_india_pct          REAL,
+    absolute_max_events     INTEGER NOT NULL,
+    pm25_twa_raw            REAL,
+    pm25_twa_corrected      REAL,
+    pm10_twa_raw            REAL,
+    pm10_twa_corrected      REAL,
+    wbgt_max_c              REAL,
+    wbgt_time_above_limit_s REAL,
+    co2_twa_ppm             REAL,
+    data_coverage_pct       REAL,
+    coverage_by_metric      TEXT NOT NULL,
+    flags                   TEXT NOT NULL,
+    label                   TEXT NOT NULL CHECK (label = 'measured_environmental'),
+    dust_label              TEXT NOT NULL,
+    wbgt_t_nw_method        TEXT NOT NULL,
+    wbgt_approximate        INTEGER NOT NULL CHECK (wbgt_approximate IN (0, 1)),
+    engine_version          TEXT NOT NULL,
+    params                  TEXT NOT NULL,
+    UNIQUE (zone_id, shift_start_ms)
+);
+CREATE INDEX IF NOT EXISTS ix_zes_date ON zone_exposure_summary (shift_date);

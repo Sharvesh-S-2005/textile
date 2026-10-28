@@ -24,8 +24,9 @@ from typing import Any, Iterable, Iterator
 
 SCHEMA_PATH: Path = Path(__file__).resolve().parent / "schema.sql"
 BUSY_TIMEOUT_MS = 5000
-# PRAGMA user_version. 1 = Day 2 (no epoch columns); 2 = Day 3 (ts_epoch_ms).
-SCHEMA_VERSION = 2
+# PRAGMA user_version. 1 = Day 2 (no epoch columns); 2 = ts_epoch_ms;
+# 3 = materialised exposure tables (new tables only, created by schema.sql).
+SCHEMA_VERSION = 3
 # Tables whose device `ts` gets a `ts_epoch_ms` companion.
 TS_TABLES: tuple[str, ...] = (
     "zone_env", "ble_scans", "ble_sightings", "machine_status", "gate_events",
@@ -49,8 +50,27 @@ ACCEPTED_TABLES: dict[str, str] = {
 ALL_TABLES: tuple[str, ...] = (
     "zone_env", "ble_scans", "ble_sightings", "machine_status", "gate_events",
     "ppe_entries", "device_status", "rejected_records", "zone_assignments",
-    "worker_sessions",
+    "worker_sessions", "personal_exposure_shift", "personal_exposure_cumulative",
+    "zone_exposure_summary",
 )
+
+# Materialised exposure tables: the date column a recompute replaces by, the JSON
+# columns, boolean columns, and the read order.
+EXPOSURE_TABLES: dict[str, dict[str, Any]] = {
+    "personal_exposure_shift": {
+        "date_col": "shift_date", "order": "worker_id, session_start_ms",
+        "json": ("session_flags", "absolute_max_events", "coverage_by_metric", "zones_visited", "flags",
+                 "measured_personal", "criteria_sources", "params"),
+        "bool": ("wbgt_approximate",),
+    },
+    "personal_exposure_cumulative": {
+        "date_col": "as_of_date", "order": "worker_id, window_days", "json": ("params",), "bool": ("partial",),
+    },
+    "zone_exposure_summary": {
+        "date_col": "shift_date", "order": "zone_id, shift_start_ms",
+        "json": ("coverage_by_metric", "flags", "params"), "bool": ("wbgt_approximate",),
+    },
+}
 
 
 def to_epoch_ms(ts: str) -> int:
@@ -476,6 +496,75 @@ class Repo:
         """Every session, ordered by worker then start."""
         return self._select(
             "SELECT * FROM worker_sessions ORDER BY worker_id, COALESCE(session_start_ms, session_end_ms)")
+
+    # ------------------------------------------------------------ exposure tables
+
+    def replace_exposure_rows(self, table: str, date: str, rows: Iterable[dict[str, Any]],
+                              worker_id: str | None = None) -> int:
+        """Replace one date's rows in a materialised exposure table (idempotent).
+
+        Deletes the rows for `date` (optionally only `worker_id`'s) and inserts
+        `rows`, every one of which must carry that date. Rows for other dates are
+        never touched. Returns rows written.
+        """
+        spec = EXPOSURE_TABLES[table]
+        date_col = spec["date_col"]
+        if worker_id is None:
+            self._conn.execute(f"DELETE FROM {table} WHERE {date_col} = ?", (date,))
+        else:
+            self._conn.execute(f"DELETE FROM {table} WHERE {date_col} = ? AND worker_id = ?", (date, worker_id))
+        n = 0
+        for r in rows:
+            if r[date_col] != date:
+                raise ValueError(f"{table} row has {date_col}={r[date_col]!r}, expected {date!r}")
+            if worker_id is not None and r.get("worker_id") != worker_id:
+                raise ValueError(f"{table} row is for {r.get('worker_id')!r}, expected {worker_id!r}")
+            row = {k: (json.dumps(v, sort_keys=True) if k in spec["json"] and v is not None else
+                       int(v) if k in spec["bool"] else v) for k, v in r.items()}
+            cols = ", ".join(row)
+            self._conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({', '.join('?' for _ in row)})",
+                               tuple(row.values()))
+            n += 1
+        return n
+
+    def get_exposure_rows(self, table: str, start_date: str | None = None, end_date: str | None = None,
+                          worker_id: str | None = None) -> list[dict[str, Any]]:
+        """Rows of a materialised exposure table with start_date <= date <= end_date
+        (inclusive, 'YYYY-MM-DD'), optionally for one worker; JSON decoded."""
+        spec = EXPOSURE_TABLES[table]
+        clauses, params = [], []
+        if start_date is not None:
+            clauses.append(f"{spec['date_col']} >= ?")
+            params.append(start_date)
+        if end_date is not None:
+            clauses.append(f"{spec['date_col']} <= ?")
+            params.append(end_date)
+        if worker_id is not None:
+            clauses.append("worker_id = ?")
+            params.append(worker_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM {table} {where} ORDER BY {spec['date_col']}, {spec['order']}", params).fetchall()
+        out = []
+        for row in rows:
+            d = dict(row)
+            for k in spec["json"]:
+                if d.get(k) is not None:
+                    d[k] = json.loads(d[k])
+            for k in spec["bool"]:
+                d[k] = bool(d[k])
+            out.append(d)
+        return out
+
+    def get_exposure_dates(self, table: str) -> list[str]:
+        """Distinct dates present in a materialised exposure table, ascending."""
+        date_col = EXPOSURE_TABLES[table]["date_col"]
+        return [r[0] for r in self._conn.execute(f"SELECT DISTINCT {date_col} FROM {table} ORDER BY 1")]
+
+    def get_data_span(self) -> tuple[str, str] | None:
+        """(first ts, last ts) of zone_env telemetry - the period the system was collecting."""
+        row = self._conn.execute("SELECT MIN(ts_epoch_ms), MAX(ts_epoch_ms) FROM zone_env").fetchone()
+        return None if row[0] is None else (from_epoch_ms(row[0]), from_epoch_ms(row[1]))
 
     def get_rejected(self) -> list[dict[str, Any]]:
         """Every rejected record, ordered by arrival."""

@@ -336,7 +336,7 @@ def test_migration_backfills_a_day2_database(tmp_path: Path) -> None:
 
     with Repo(db) as r:
         r.init_schema()                                  # detects v1 and migrates
-        assert r.schema_version() == 2
+        assert r.schema_version() == 3
         rows = r.get_zone_env("Z1", "2026-10-28T00:00:00Z", "2026-10-28T01:00:00Z")
         assert [x["ts"] for x in rows] == ["2026-10-28T00:00:10Z", "2026-10-28T00:00:10.500Z",
                                            "2026-10-28T00:00:11Z"]
