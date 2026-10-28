@@ -2,8 +2,8 @@
 
     python -m ml.features [--db PATH] [--out data/features.parquet]
 
-Built only from stored tables through db/repo.py - no exposure recomputation, no
-simulator code, no ground truth.
+Built only from stored tables through db/repo.py - no exposure recomputation and
+nothing from the simulator (its code or its scoring-only output files).
 
 Row time `t` is the END of a 1-minute bin. A zone_env reading covers the 10 s
 before its ts, so the bin ending at t holds readings with t-60 s < ts <= t: all
