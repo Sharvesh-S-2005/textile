@@ -695,3 +695,56 @@ page and sidebar option → W105 drilldown, Live Zones chart, every Models-page 
   avoid any further tuning after the test day had been seen.
 - A nowcast test (current zone noise from machine state alone) is the direct test of
   the machine-state fallback, and was not run.
+
+## Day 8A — Why the 7-day stochastic run was killed (2026-10-29)
+
+### Task 1: memory measured before changing anything
+
+The 7-day generation (Day 8 Task 2) was stopped at about 2.4 simulated days, when
+Claude Code reported LOW SYSTEM MEMORY and terminated its background processes. To
+find out what grew, the same command line (stochastics on, seed 42, same start,
+speed 90) was run for 25 wall minutes (about 37 simulated hours) into a scratch
+database. The resident set of every process was sampled every 15 s.
+Data: `docs/day8a/memory_probe_rss.csv`; figure: `docs/figures/day8a_memory_probe.png`.
+
+| Process | Resident set, first → last | Committed private memory | Trend |
+|---|---|---|---|
+| Publisher | 46.3 → 46.4 MB | 511 MB, constant | +0.004 MB/min (flat) |
+| Subscriber | 33.9 → 36.3 MB (warm-up in the first minute, then flat) | 19 → 21 MB | +0.015 MB/min (flat) |
+| Mosquitto | 8.1 → 8.1 MB | 2.8 MB | 0 |
+| Whole machine, free RAM | swung between 2.0 and 4.1 GB of 16 GB | — | driven by other applications |
+
+**Finding: nothing in the project grows.** The kill came from elsewhere on the machine.
+During the probe, the browser (about 2.7 GB), VS Code (about 2.0 GB) and system services
+pushed free RAM down to 2.0 GB. Claude Code's background-process reaper then stops the
+processes it started, and ours were those processes. Checked against the brief's
+suspects:
+
+1. **The WAL is not the cause.** It stayed at about 4.5 MB. SQLite's default
+   auto-checkpoint (1000 pages) keeps it bounded, because nothing holds a long read
+   transaction.
+2. **The ground truth already streams to disk**, one `write` per line through an open
+   file. No list is built.
+3. **The publisher has no growing list.** Message counts are a `Counter`; the outage
+   buffer is replayed and emptied. One slow growth is negligible: the stop log, about
+   50 records per machine per day.
+4. **The subscriber's stuck-value history** is a `deque(maxlen=stuck_value_count)` per
+   (device, field). Its incoming queue is unbounded in type but stays at 0 in
+   practice: commits come every 20 unacknowledged messages, so the broker never has
+   more than 20 messages in flight.
+
+**The publisher's 511 MB is not a leak.** It is OpenBLAS reserving per-thread buffers
+when numpy is imported (16 logical CPUs). With `OPENBLAS_NUM_THREADS=1` the same
+publisher commits 27 MB. The window length does not change it either: building a 30 h
+and a 168 h simulation adds the same 0.4 MB. Only about 46 MB of it is resident.
+
+**A second, unrelated defect found by the probe: stale broker session.** The ingest
+client uses a persistent session (`clean_session: false`, so the broker queues data
+while ingest is down). When the run was killed, 4 telemetry messages (ts
+2026-10-22T11:01:50Z) stayed queued for it. The next subscriber received them first,
+and in `stream` time-reference mode they moved the watermark 2.4 days ahead. **Every
+later record was then flagged `late_upload` (222,680 of 222,701 in the probe)**, and
+the 4 foreign rows were stored. The deterministic dataset has zero `late_upload`
+flags, so restarting without a purge would have made the two datasets differ in
+something other than the simulator. The restart therefore begins by discarding that
+session (Task 3).
