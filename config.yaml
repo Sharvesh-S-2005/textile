@@ -496,6 +496,65 @@ ml:
   features_path: data/features.parquet
   predictions_path: data/forecast_predictions.parquet
   metrics_path: data/forecast_metrics.json
+  # Exceedance classification (ml/classify_exceedance.py). Same split, features and
+  # seed as forecasting. The label is the MEASURED noise at t+h vs the criterion.
+  classification:
+    criterion: india                 # exposure_limits.criteria.<name>.criterion_db (90 dBA)
+    horizons_min: [30, 60]
+    variants: [above, crossing]
+    # Operating threshold = the one that maximises recall on the VALIDATION day subject
+    # to false-positive rate (FP / (FP + TN)) <= this ceiling. Missing a hazardous
+    # exposure is costlier than a false alarm, so recall is maximised, but the ceiling
+    # stops the classifier from simply alarming all the time. A stated choice, not a
+    # tuned value.
+    max_false_positive_rate: 0.10
+    # Hyperparameter grids, searched on the validation day (selection metric: PR-AUC).
+    grids:
+      logistic_regression: {C: [0.01, 0.1, 1.0, 10.0], class_weight: [null, balanced]}
+      random_forest: {n_estimators: [200], max_depth: [8, 14, null], min_samples_leaf: [5, 20]}
+      xgboost: {n_estimators: [400], max_depth: [3, 6], learning_rate: [0.05, 0.1],
+                subsample: [0.8], colsample_bytree: [0.8]}
+    xgboost_early_stopping_rounds: 30
+    predictions_path: data/classification_predictions.parquet
+    metrics_path: data/classification_metrics.json
+  # Model 1 / 2 / 3 feature ablation (ml/ablation.py). One model class for all three
+  # sets, tuned SEPARATELY per set on the validation day over the same grid.
+  ablation:
+    model: xgboost
+    grid: {n_estimators: [400], max_depth: [3, 6], learning_rate: [0.05, 0.1],
+           subsample: [0.8], colsample_bytree: [0.8]}
+    early_stopping_rounds: 30
+    forecast_targets: [noise_dba, pm25_ugm3, wbgt_c]
+    classification_variants: [above, crossing]
+    # Zone-history features added in Model 3 (trailing windows ending at t).
+    history_long_window_min: 480     # 8 h: zone L_Aeq,8h-style noise and mean dust
+    history_machine_window_min: 60   # fraction of the last hour machines were running
+    history_min_coverage: 0.5        # NaN unless half the window has data
+    # Block bootstrap on the test day: resample (zone, block) groups with replacement.
+    # Blocks keep autocorrelated minutes together, so the interval is not falsely narrow.
+    bootstrap_resamples: 500
+    bootstrap_block_min: 60
+    bootstrap_ci: 0.95
+    metrics_path: data/ablation_metrics.json
+  # Machine condition monitoring (ml/anomaly.py). Ground truth for evaluation only:
+  # machines[].degrading. The detectors never see it.
+  anomaly:
+    db_path: data/week/textile_ohs.db  # the 7-day run the feature table was built from
+    bin_min: 10                    # running-only vibration readings averaged per 10 min
+    min_running_fraction: 0.5      # a bin is used only if the machine ran >= half of it
+    reference_days: 1              # Phase I: each machine's first day is its own baseline
+    rolling_bins: 6                # rolling means over 1 h of valid bins (IF features)
+    # EWMA control chart on the standardised 10-min vib_rms. lambda 0.1 targets small
+    # sustained shifts (wear); L = 3.5 keeps the in-control average run length far
+    # above the ~1,000 bins a machine produces in a week. Set before looking at M5.
+    ewma: {lambda: 0.1, limit_sigma: 3.5}
+    # Isolation forest per machine, fitted on its reference bins; a bin is flagged if
+    # its anomaly score exceeds the 99th percentile of the reference scores.
+    isolation_forest: {n_estimators: 200, reference_quantile: 0.99}
+    alarm_consecutive_bins: 3      # an ALARM = 3 consecutive flagged bins (both detectors)
+    lead_lag_bin_min: 60
+    lead_lag_max_lag_h: 12
+    metrics_path: data/anomaly_metrics.json
 
 paths:
   db_path: data/textile_ohs.db
