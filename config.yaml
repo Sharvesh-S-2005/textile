@@ -637,6 +637,21 @@ ml:
     lead_lag_bin_min: 60
     lead_lag_max_lag_h: 12
     metrics_path: data/anomaly_metrics.json
+  # Day 8 side-by-side comparison (ml/compare_datasets.py). Both datasets are evaluated
+  # with identical code and configuration; only the simulator differs.
+  comparison:
+    deterministic_dir: data/                  # Day 4-7 outputs (data/week/textile_ohs.db)
+    deterministic_db: data/week/textile_ohs.db
+    stochastic_dir: data/week_stochastic/
+    stochastic_db: data/week_stochastic/textile_ohs.db
+    # Prediction 4b (pre-registered): share of sustained 90 dBA upward crossings in the
+    # borderline zones within +/- window of a schedule boundary. Boundary = shift start +
+    # crew changeover, shift end, break start, break end (the definition in
+    # simulator/verify_stochastics.py). changeover_min mirrors
+    # simulation.machine_dynamics.changeover_min (a mill practice; a test keeps them equal).
+    clock_window_min: 10
+    changeover_min: 10
+    event_sustain_min: 5
   # Optional deep sequence model (ml/deep_forecast.py, Day 6 Task 4). Modest by design:
   # no architecture search. Compared against XGBoost on the ablation's Model 3 features.
   deep:

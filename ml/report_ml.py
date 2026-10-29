@@ -22,6 +22,11 @@ import config
 ROOT = config.CONFIG_PATH.parent
 FORECAST_MODELS = ("persistence", "seasonal", "random_forest", "xgboost")
 CLASSIFY_MODELS = ("persistence", "logistic_regression", "random_forest", "xgboost")
+TRAINING_DATA = ("Two datasets, identical configuration. **Deterministic** (`data/week/textile_ohs.db`, machines run "
+                 "exactly on the timetable) → `models/`; this is the deployed set. **Stochastic** (Day 8, "
+                 "`data/week_stochastic/textile_ohs.db`, unplanned stops and uneven starts; pre-registered) → "
+                 "`models/stochastic/`. Both are simulated. Results side by side in `results_ablation.md` and "
+                 "`results_classification.md`.")
 NOT_ATTEMPTED = ("Not attempted. It is optional in the Day 6 brief and was to be attempted only after Tasks 1, 2, "
                  "3 and 5.")
 
@@ -232,6 +237,7 @@ def write_model_cards(m: dict[str, Any], out_path: Path) -> None:
             ("Label source", f"Measured zone {units[target]} at t+h (`measured_environmental`)."),
             ("Output label", "`predicted_risk` (an ML output, per the project's labelling rule). It is a forecast "
                              "of a zone hazard level, not of anyone's health."),
+            ("Training data", TRAINING_DATA),
             ("Training window / split", split),
             ("Model and hyperparameters", f"Chosen per horizon by validation MAE ({chosen}). RF {hp['random_forest']}; "
                                           f"XGBoost {hp['xgboost']}, early stopping "
@@ -271,6 +277,7 @@ def write_model_cards(m: dict[str, Any], out_path: Path) -> None:
                 ("Label source", f"Measured noise at t+h vs the {c['criterion']} criterion ({c['threshold_db']:.0f} "
                                  "dBA). A future measurement, not a rule on the inputs, so not circular."),
                 ("Output label", "`predicted_risk` (an ML output). A zone-level hazard flag, not a health estimate."),
+                ("Training data", TRAINING_DATA),
                 ("Training window / split", "; ".join(c["splits"])),
                 ("Hyperparameters and search grid", f"Grid (validation PR-AUC): `{json.dumps(cc['grids'])}`. Chosen: "
                                                     f"{params}. Threshold: highest validation recall with FPR ≤ "
@@ -289,6 +296,8 @@ def write_model_cards(m: dict[str, Any], out_path: Path) -> None:
             ("Purpose", "Flag a machine whose vibration has drifted from its own baseline (wear)."),
             ("Inputs", f"{s['bin_min']}-min mean vib_rms_g of running-only, unflagged readings."),
             ("Label source", "None for training (unsupervised). Scored against `machines[].degrading` in config.yaml."),
+            ("Training data", "Unsupervised; calibrated per machine on each dataset separately (deterministic "
+                              "`data/week/`, stochastic `data/week_stochastic/`)."),
             ("Training window", f"Each machine's own first {s['reference_days']} day (Phase I reference)."),
             ("Parameters", f"λ = {s['ewma']['lambda']}, limits ±{s['ewma']['limit_sigma']}σ (exact width), alarm = "
                            f"{s['alarm_consecutive_bins']} consecutive flagged bins. Set before results were seen."),

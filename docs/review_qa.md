@@ -92,7 +92,24 @@ and a warning adds nothing, which is why the pooled PR-AUC of 0.83 is not the re
 quote. Zone-specific thresholds and features that see fluctuations coming are the next
 step.
 
-**14. What is left?**
+**14. "Did you change the simulator until the result came out right?"**
+No. The stoppage parameters and four predictions, including the falsification condition
+for the main one, were written in `docs/preregistration_day8.md` and committed (commit
+2adad2b) **before** any evaluation ran on the new data. The git history shows the order.
+The parameters come from mill characteristics. Only the weaving band (78–92% loom
+efficiency) is from the literature; the rest are labelled project assumptions. The one
+calibration step (carding's stop rate, to bring its *measured availability* into its
+band) is disclosed, and it happened before any model was trained. Both datasets are
+reported side by side, and a failed prediction is reported as failed.
+
+**15. "Why was the first simulator wrong?"**
+It was unrealistically clean: machines ran exactly on the timetable, with 0% unplanned
+downtime, where real looms stop 8–22% of the time. That made machine state, worker
+presence and the clock the same signal, so Objective 6 could not be answered. We found
+this by measuring it (the Day 7 redundancy analysis: a model with no noise input at all
+forecast as well as the full model), not by assuming it.
+
+**16. What is left?**
 Hardware deployment and firmware testing on real boards, questionnaire labels for a
 risk model, calibration against a handheld sound-level meter and a reference dust
 sampler, and the TimescaleDB migration.
