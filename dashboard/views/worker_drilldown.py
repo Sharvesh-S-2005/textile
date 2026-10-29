@@ -8,11 +8,13 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import config
+from exposure.risk_index import RiskParams, worst_component
 
 from dashboard.common import (HAZARD, INDEX_CAVEAT, LIGHT, NEUTRAL, TZ, all_assignments, band_badge, db_path,
                               empty, exposure_dates, exposure_rows, header, sidebar_filters, to_local, zone_env)
 
 EXCLUDED = set(config.get_exposure_methods()["personal"]["exclude_record_flags"])
+RISK_PARAMS = RiskParams.from_config(config.get_risk_index_config(), config.get_exposure_limits()["wbgt_limit_c"])
 COMPONENT_COLOUR = {"hearing": HAZARD["noise"], "heat": HAZARD["heat"], "respiratory": HAZARD["dust"]}
 
 
@@ -134,8 +136,14 @@ with left:
     if r_index is None:
         st.info("No risk index computed for this worker and day.")
     else:
+        worst = worst_component(r_index["components"], RISK_PARAMS)
         st.markdown(f"### Risk index {r_index['overall_index']:.1f} / 100 &nbsp; {band_badge(r_index['band'])}",
                     unsafe_allow_html=True)
+        st.markdown(f"**Worst single component: {worst['component']} {worst['value']:.1f} / 100** &nbsp; "
+                    f"{band_badge(worst['band'])}", unsafe_allow_html=True)
+        st.caption("Both are reported because the components are not on commensurable scales (hearing is "
+                   "standards-anchored, respiratory is cohort-relative); the weighted composite can hide one high "
+                   "component behind two low ones.")
         st.caption(f"label `{r_index['label']}` · confidence {r_index['confidence_pct']:.1f}% "
                    + ("— below 80%: band suppressed, number shown" if r_index["insufficient_data"] else "")
                    + f" · weights {r_index['weights']} · {r_index['version']}")

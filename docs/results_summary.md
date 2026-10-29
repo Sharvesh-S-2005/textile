@@ -4,7 +4,7 @@
 
 | Area | Measure | Value | Source |
 |---|---|---|---|
-| Tests | pytest tests collected | **380** (all passing at last commit) | `pytest` |
+| Tests | pytest tests collected | **430** (all passing at last commit) | `pytest` |
 | Data loss | Day 2 run (8 h, 100×): published + injected = received = stored + rejected | 49,979 + 13 = **49,992** = 49,979 + 13 (dup 0, errors 0) | publisher + ingest logs |
 | Ingest | Day 2 run (8 h, 100×): sustained throughput | **173.6 msg/s** (peak 30-s rate 200.6) | ingest log |
 | Data loss | 7-day run (90×): published + injected = received = stored + rejected | 1,071,656 + 0 = **1,071,656** = 1,071,656 + 0 (dup 0, errors 0) | publisher + ingest logs |
@@ -28,5 +28,12 @@
 | Forecast | noise_dba_h60: 90 dBA crossings warned (hit rate), median lead, false-alarm ratio | 36/36 (100%), **18.5 min**, 5.3% | forecast_metrics.json |
 | Explainability | SHAP importance shares, noise t+30 | recent hazard values (lags, rolling stats) 37%, schedule (time of day, shift, break) 29%, machine state 21% | shap_noise_h30.json |
 | Risk index | Bands over 140 worker-days (deterministic_index; weights a design choice) | High 110, Low 14, Medium 16 | worker_risk_index |
+| Risk index | Worst single component, shown beside the composite: bands | High 121, Low 1, Medium 18; worst band above the composite band on 24 worker-days | worker_risk_index |
+| Classification | above_h30: prevalence; PR-AUC xgboost vs persistence; F1 | 39.8%; **0.969** vs 0.674; 0.891 | classification_metrics.json |
+| Classification | crossing_h30: prevalence; PR-AUC xgboost vs persistence; F1 | 15.9%; **0.834** vs 0.159; 0.683 | classification_metrics.json |
+| Classification | crossing_h60: prevalence; PR-AUC xgboost vs persistence; F1 | 16.2%; **0.841** vs 0.162; 0.680 | classification_metrics.json |
+| Ablation | noise_dba_h30: skill Model 3 − Model 1 [95% CI]; Model 2 − Model 1 | **+0.017** [+0.011, +0.025]; +0.007 [+0.002, +0.013] | ablation_metrics.json |
+| Ablation | noise_dba_h60: skill Model 3 − Model 1 [95% CI]; Model 2 − Model 1 | **+0.028** [+0.020, +0.037]; +0.001 [-0.003, +0.005] | ablation_metrics.json |
+| Anomaly | M5 detection day EWMA / isolation forest; healthy per-bin FPR | **2.08 / 2.12**; 0.02% / 1.03% | anomaly_metrics.json |
 
 Negative findings are kept: at 60 min neither ML model beats the seasonal baseline for noise, and for WBGT the seasonal baseline is worse than persistence (`results_forecast.md`).

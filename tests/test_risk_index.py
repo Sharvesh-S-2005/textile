@@ -10,7 +10,7 @@ import config
 from db.repo import Repo
 from exposure import engine
 from exposure.risk_index import (LABEL, RiskParams, compute_day, compute_index, heat_component, hearing_component,
-                                 percentile_rank)
+                                 percentile_rank, worst_component)
 
 P = RiskParams.from_config(config.get_risk_index_config(), config.get_exposure_limits()["wbgt_limit_c"])
 METRICS = P.respiratory_metrics
@@ -150,3 +150,22 @@ def test_regression_higher_l_ex_never_scores_below_lower_l_ex() -> None:
         louder = compute_index(worker(l_ex_8h_db=high, mean_daily_l_ex_7d_db=high), COHORT, P)
         assert louder["components"]["hearing"] > quieter["components"]["hearing"], (low, high)
         assert louder["overall_index"] > quieter["overall_index"], (low, high)
+
+
+def test_worst_component_is_reported_beside_the_composite() -> None:
+    """Hearing 90, heat 0, respiratory 0: the equal-weight composite is 30 (Low), but the
+    worst single component is hearing at 90 (High). Both must be available."""
+    comps = {"hearing": 90.0, "heat": 0.0, "respiratory": 0.0}
+    w = worst_component(comps, P)
+    assert w == {"component": "hearing", "value": 90.0, "band": "High"}
+    from exposure.risk_index import combine
+    overall, _ = combine(comps, P)
+    assert overall == pytest.approx(30.0) and overall < w["value"]
+
+
+def test_worst_component_never_below_the_composite() -> None:
+    rng = np.random.default_rng(0)
+    from exposure.risk_index import combine
+    for _ in range(200):
+        comps = dict(zip(("hearing", "heat", "respiratory"), rng.uniform(0, 100, 3)))
+        assert worst_component(comps, P)["value"] >= combine(comps, P)[0] - 1e-9

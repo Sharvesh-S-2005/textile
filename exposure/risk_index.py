@@ -139,6 +139,19 @@ def combine(components: dict[str, float], p: RiskParams) -> tuple[float, dict[st
     return overall, contributions
 
 
+def worst_component(components: dict[str, float], p: RiskParams) -> dict[str, Any]:
+    """The single highest component, reported ALONGSIDE the weighted composite.
+
+    The components are not on commensurable scales: hearing is anchored to a standard
+    (L_EX,8h, ISO 9612), respiratory is cohort-relative. Averaging them can hide one
+    clearly high exposure behind two low ones, so both figures are reported, and
+    neither replaces the other. Derived from stored components; nothing recomputed.
+    Ties go to the first component in COMPONENTS order.
+    """
+    name = max(COMPONENTS, key=lambda c: components[c])
+    return {"component": name, "value": float(components[name]), "band": band_for(components[name], p)}
+
+
 def compute_index(worker: dict[str, Any], cohort: dict[str, list[float]], p: RiskParams) -> dict[str, Any]:
     """Risk index for one worker-day.
 

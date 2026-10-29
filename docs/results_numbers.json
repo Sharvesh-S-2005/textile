@@ -1,5 +1,5 @@
 {
-  "tests": 380,
+  "tests": 430,
   "day2_run": {
     "published": 49979,
     "by_type": {
@@ -760,6 +760,731 @@
       }
     }
   },
+  "ml": {
+    "comparison": [
+      {
+        "task": "A. Forecast",
+        "target": "noise_dba",
+        "h": "30",
+        "model": "persistence",
+        "metric": "skill vs persistence",
+        "value": "+0.000",
+        "secondary": "MAE 8.08, R\u00b2 0.098",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "noise_dba",
+        "h": "30",
+        "model": "seasonal",
+        "metric": "skill vs persistence",
+        "value": "+0.765",
+        "secondary": "MAE 1.90, R\u00b2 0.973",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "noise_dba",
+        "h": "30",
+        "model": "random_forest",
+        "metric": "skill vs persistence",
+        "value": "+0.805",
+        "secondary": "MAE 1.57, R\u00b2 0.975",
+        "note": "saved model"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "noise_dba",
+        "h": "30",
+        "model": "xgboost",
+        "metric": "skill vs persistence",
+        "value": "+0.745",
+        "secondary": "MAE 2.06, R\u00b2 0.957",
+        "note": ""
+      },
+      {
+        "task": "A. Forecast",
+        "target": "noise_dba",
+        "h": "60",
+        "model": "persistence",
+        "metric": "skill vs persistence",
+        "value": "+0.000",
+        "secondary": "MAE 8.14, R\u00b2 0.090",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "noise_dba",
+        "h": "60",
+        "model": "seasonal",
+        "metric": "skill vs persistence",
+        "value": "+0.766",
+        "secondary": "MAE 1.90, R\u00b2 0.973",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "noise_dba",
+        "h": "60",
+        "model": "random_forest",
+        "metric": "skill vs persistence",
+        "value": "+0.741",
+        "secondary": "MAE 2.11, R\u00b2 0.937",
+        "note": "saved model"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "noise_dba",
+        "h": "60",
+        "model": "xgboost",
+        "metric": "skill vs persistence",
+        "value": "+0.746",
+        "secondary": "MAE 2.06, R\u00b2 0.958",
+        "note": ""
+      },
+      {
+        "task": "A. Forecast",
+        "target": "pm25_ugm3",
+        "h": "30",
+        "model": "persistence",
+        "metric": "skill vs persistence",
+        "value": "+0.000",
+        "secondary": "MAE 62.97, R\u00b2 0.469",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "pm25_ugm3",
+        "h": "30",
+        "model": "seasonal",
+        "metric": "skill vs persistence",
+        "value": "+0.254",
+        "secondary": "MAE 46.94, R\u00b2 0.684",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "pm25_ugm3",
+        "h": "30",
+        "model": "random_forest",
+        "metric": "skill vs persistence",
+        "value": "+0.344",
+        "secondary": "MAE 41.31, R\u00b2 0.751",
+        "note": ""
+      },
+      {
+        "task": "A. Forecast",
+        "target": "pm25_ugm3",
+        "h": "30",
+        "model": "xgboost",
+        "metric": "skill vs persistence",
+        "value": "+0.384",
+        "secondary": "MAE 38.80, R\u00b2 0.776",
+        "note": "saved model"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "pm25_ugm3",
+        "h": "60",
+        "model": "persistence",
+        "metric": "skill vs persistence",
+        "value": "+0.000",
+        "secondary": "MAE 66.95, R\u00b2 0.364",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "pm25_ugm3",
+        "h": "60",
+        "model": "seasonal",
+        "metric": "skill vs persistence",
+        "value": "+0.298",
+        "secondary": "MAE 47.03, R\u00b2 0.683",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "pm25_ugm3",
+        "h": "60",
+        "model": "random_forest",
+        "metric": "skill vs persistence",
+        "value": "+0.401",
+        "secondary": "MAE 40.10, R\u00b2 0.763",
+        "note": ""
+      },
+      {
+        "task": "A. Forecast",
+        "target": "pm25_ugm3",
+        "h": "60",
+        "model": "xgboost",
+        "metric": "skill vs persistence",
+        "value": "+0.434",
+        "secondary": "MAE 37.89, R\u00b2 0.791",
+        "note": "saved model"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "wbgt_c",
+        "h": "30",
+        "model": "persistence",
+        "metric": "skill vs persistence",
+        "value": "+0.000",
+        "secondary": "MAE 0.82, R\u00b2 0.862",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "wbgt_c",
+        "h": "30",
+        "model": "seasonal",
+        "metric": "skill vs persistence",
+        "value": "-0.280",
+        "secondary": "MAE 1.05, R\u00b2 0.767",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "wbgt_c",
+        "h": "30",
+        "model": "random_forest",
+        "metric": "skill vs persistence",
+        "value": "+0.048",
+        "secondary": "MAE 0.78, R\u00b2 0.872",
+        "note": ""
+      },
+      {
+        "task": "A. Forecast",
+        "target": "wbgt_c",
+        "h": "30",
+        "model": "xgboost",
+        "metric": "skill vs persistence",
+        "value": "+0.125",
+        "secondary": "MAE 0.72, R\u00b2 0.891",
+        "note": "saved model"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "wbgt_c",
+        "h": "60",
+        "model": "persistence",
+        "metric": "skill vs persistence",
+        "value": "+0.000",
+        "secondary": "MAE 1.01, R\u00b2 0.787",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "wbgt_c",
+        "h": "60",
+        "model": "seasonal",
+        "metric": "skill vs persistence",
+        "value": "-0.040",
+        "secondary": "MAE 1.05, R\u00b2 0.765",
+        "note": "baseline"
+      },
+      {
+        "task": "A. Forecast",
+        "target": "wbgt_c",
+        "h": "60",
+        "model": "random_forest",
+        "metric": "skill vs persistence",
+        "value": "+0.149",
+        "secondary": "MAE 0.86, R\u00b2 0.840",
+        "note": ""
+      },
+      {
+        "task": "A. Forecast",
+        "target": "wbgt_c",
+        "h": "60",
+        "model": "xgboost",
+        "metric": "skill vs persistence",
+        "value": "+0.214",
+        "secondary": "MAE 0.79, R\u00b2 0.865",
+        "note": "saved model"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "noise_dba",
+        "h": "30",
+        "model": "XGBoost model 1",
+        "metric": "skill vs persistence",
+        "value": "+0.743",
+        "secondary": "MAE 2.07",
+        "note": ""
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "noise_dba",
+        "h": "30",
+        "model": "XGBoost model 2",
+        "metric": "skill vs persistence",
+        "value": "+0.750",
+        "secondary": "MAE 2.02",
+        "note": "\u0394 vs Model 1 +0.007 [+0.002, +0.013]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "noise_dba",
+        "h": "30",
+        "model": "XGBoost model 3",
+        "metric": "skill vs persistence",
+        "value": "+0.760",
+        "secondary": "MAE 1.94",
+        "note": "\u0394 vs Model 1 +0.017 [+0.011, +0.025]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "noise_dba",
+        "h": "60",
+        "model": "XGBoost model 1",
+        "metric": "skill vs persistence",
+        "value": "+0.759",
+        "secondary": "MAE 1.96",
+        "note": ""
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "noise_dba",
+        "h": "60",
+        "model": "XGBoost model 2",
+        "metric": "skill vs persistence",
+        "value": "+0.760",
+        "secondary": "MAE 1.95",
+        "note": "\u0394 vs Model 1 +0.001 [-0.003, +0.005]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "noise_dba",
+        "h": "60",
+        "model": "XGBoost model 3",
+        "metric": "skill vs persistence",
+        "value": "+0.787",
+        "secondary": "MAE 1.73",
+        "note": "\u0394 vs Model 1 +0.028 [+0.020, +0.037]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "pm25_ugm3",
+        "h": "30",
+        "model": "XGBoost model 1",
+        "metric": "skill vs persistence",
+        "value": "+0.383",
+        "secondary": "MAE 38.06",
+        "note": ""
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "pm25_ugm3",
+        "h": "30",
+        "model": "XGBoost model 2",
+        "metric": "skill vs persistence",
+        "value": "+0.384",
+        "secondary": "MAE 38.00",
+        "note": "\u0394 vs Model 1 +0.001 [-0.007, +0.009]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "pm25_ugm3",
+        "h": "30",
+        "model": "XGBoost model 3",
+        "metric": "skill vs persistence",
+        "value": "+0.369",
+        "secondary": "MAE 38.98",
+        "note": "\u0394 vs Model 1 -0.015 [-0.041, +0.011]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "pm25_ugm3",
+        "h": "60",
+        "model": "XGBoost model 1",
+        "metric": "skill vs persistence",
+        "value": "+0.430",
+        "secondary": "MAE 37.56",
+        "note": ""
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "pm25_ugm3",
+        "h": "60",
+        "model": "XGBoost model 2",
+        "metric": "skill vs persistence",
+        "value": "+0.429",
+        "secondary": "MAE 37.62",
+        "note": "\u0394 vs Model 1 -0.001 [-0.006, +0.004]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "pm25_ugm3",
+        "h": "60",
+        "model": "XGBoost model 3",
+        "metric": "skill vs persistence",
+        "value": "+0.439",
+        "secondary": "MAE 36.95",
+        "note": "\u0394 vs Model 1 +0.009 [-0.008, +0.026]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "wbgt_c",
+        "h": "30",
+        "model": "XGBoost model 1",
+        "metric": "skill vs persistence",
+        "value": "+0.149",
+        "secondary": "MAE 0.70",
+        "note": ""
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "wbgt_c",
+        "h": "30",
+        "model": "XGBoost model 2",
+        "metric": "skill vs persistence",
+        "value": "+0.149",
+        "secondary": "MAE 0.70",
+        "note": "\u0394 vs Model 1 +0.000 [-0.006, +0.006]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "wbgt_c",
+        "h": "30",
+        "model": "XGBoost model 3",
+        "metric": "skill vs persistence",
+        "value": "+0.155",
+        "secondary": "MAE 0.69",
+        "note": "\u0394 vs Model 1 +0.006 [-0.006, +0.022]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "wbgt_c",
+        "h": "60",
+        "model": "XGBoost model 1",
+        "metric": "skill vs persistence",
+        "value": "+0.231",
+        "secondary": "MAE 0.78",
+        "note": ""
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "wbgt_c",
+        "h": "60",
+        "model": "XGBoost model 2",
+        "metric": "skill vs persistence",
+        "value": "+0.238",
+        "secondary": "MAE 0.77",
+        "note": "\u0394 vs Model 1 +0.007 [-0.002, +0.015]"
+      },
+      {
+        "task": "Ablation (A)",
+        "target": "wbgt_c",
+        "h": "60",
+        "model": "XGBoost model 3",
+        "metric": "skill vs persistence",
+        "value": "+0.244",
+        "secondary": "MAE 0.76",
+        "note": "\u0394 vs Model 1 +0.013 [-0.005, +0.031]"
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "above (prev. 39.8%)",
+        "h": "30",
+        "model": "persistence",
+        "metric": "PR-AUC",
+        "value": "0.674",
+        "secondary": "F1 0.760, recall 0.756, FPR 0.155",
+        "note": "baseline"
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "above (prev. 39.8%)",
+        "h": "30",
+        "model": "logistic_regression",
+        "metric": "PR-AUC",
+        "value": "0.896",
+        "secondary": "F1 0.808, recall 0.779, FPR 0.099",
+        "note": ""
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "above (prev. 39.8%)",
+        "h": "30",
+        "model": "random_forest",
+        "metric": "PR-AUC",
+        "value": "0.948",
+        "secondary": "F1 0.879, recall 0.905, FPR 0.101",
+        "note": ""
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "above (prev. 39.8%)",
+        "h": "30",
+        "model": "xgboost",
+        "metric": "PR-AUC",
+        "value": "0.969",
+        "secondary": "F1 0.891, recall 0.926, FPR 0.100",
+        "note": "saved model"
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "crossing (prev. 15.9%)",
+        "h": "30",
+        "model": "persistence",
+        "metric": "PR-AUC",
+        "value": "0.159",
+        "secondary": "F1 0.000, recall 0.000, FPR 0.000",
+        "note": "baseline"
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "crossing (prev. 15.9%)",
+        "h": "30",
+        "model": "logistic_regression",
+        "metric": "PR-AUC",
+        "value": "0.792",
+        "secondary": "F1 0.637, recall 0.715, FPR 0.100",
+        "note": ""
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "crossing (prev. 15.9%)",
+        "h": "30",
+        "model": "random_forest",
+        "metric": "PR-AUC",
+        "value": "0.826",
+        "secondary": "F1 0.660, recall 0.771, FPR 0.106",
+        "note": ""
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "crossing (prev. 15.9%)",
+        "h": "30",
+        "model": "xgboost",
+        "metric": "PR-AUC",
+        "value": "0.834",
+        "secondary": "F1 0.683, recall 0.776, FPR 0.094",
+        "note": "saved model"
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "above (prev. 40.1%)",
+        "h": "60",
+        "model": "persistence",
+        "metric": "PR-AUC",
+        "value": "0.673",
+        "secondary": "F1 0.757, recall 0.748, FPR 0.154",
+        "note": "baseline"
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "above (prev. 40.1%)",
+        "h": "60",
+        "model": "logistic_regression",
+        "metric": "PR-AUC",
+        "value": "0.894",
+        "secondary": "F1 0.826, recall 0.801, FPR 0.093",
+        "note": ""
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "above (prev. 40.1%)",
+        "h": "60",
+        "model": "random_forest",
+        "metric": "PR-AUC",
+        "value": "0.949",
+        "secondary": "F1 0.882, recall 0.902, FPR 0.096",
+        "note": ""
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "above (prev. 40.1%)",
+        "h": "60",
+        "model": "xgboost",
+        "metric": "PR-AUC",
+        "value": "0.968",
+        "secondary": "F1 0.891, recall 0.924, FPR 0.100",
+        "note": "saved model"
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "crossing (prev. 16.2%)",
+        "h": "60",
+        "model": "persistence",
+        "metric": "PR-AUC",
+        "value": "0.162",
+        "secondary": "F1 0.000, recall 0.000, FPR 0.000",
+        "note": "baseline"
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "crossing (prev. 16.2%)",
+        "h": "60",
+        "model": "logistic_regression",
+        "metric": "PR-AUC",
+        "value": "0.808",
+        "secondary": "F1 0.675, recall 0.750, FPR 0.091",
+        "note": ""
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "crossing (prev. 16.2%)",
+        "h": "60",
+        "model": "random_forest",
+        "metric": "PR-AUC",
+        "value": "0.831",
+        "secondary": "F1 0.660, recall 0.803, FPR 0.122",
+        "note": ""
+      },
+      {
+        "task": "B. Exceedance",
+        "target": "crossing (prev. 16.2%)",
+        "h": "60",
+        "model": "xgboost",
+        "metric": "PR-AUC",
+        "value": "0.841",
+        "secondary": "F1 0.680, recall 0.807, FPR 0.110",
+        "note": "saved model"
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "above",
+        "h": "30",
+        "model": "XGBoost model 1",
+        "metric": "PR-AUC",
+        "value": "0.969",
+        "secondary": "F1 0.887",
+        "note": ""
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "above",
+        "h": "30",
+        "model": "XGBoost model 2",
+        "metric": "PR-AUC",
+        "value": "0.969",
+        "secondary": "F1 0.891",
+        "note": "\u0394 vs Model 1 +0.000 [-0.000, +0.001]"
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "above",
+        "h": "30",
+        "model": "XGBoost model 3",
+        "metric": "PR-AUC",
+        "value": "0.968",
+        "secondary": "F1 0.891",
+        "note": "\u0394 vs Model 1 -0.001 [-0.002, +0.001]"
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "crossing",
+        "h": "30",
+        "model": "XGBoost model 1",
+        "metric": "PR-AUC",
+        "value": "0.834",
+        "secondary": "F1 0.676",
+        "note": ""
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "crossing",
+        "h": "30",
+        "model": "XGBoost model 2",
+        "metric": "PR-AUC",
+        "value": "0.834",
+        "secondary": "F1 0.681",
+        "note": "\u0394 vs Model 1 +0.001 [-0.002, +0.003]"
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "crossing",
+        "h": "30",
+        "model": "XGBoost model 3",
+        "metric": "PR-AUC",
+        "value": "0.834",
+        "secondary": "F1 0.677",
+        "note": "\u0394 vs Model 1 -0.000 [-0.005, +0.004]"
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "above",
+        "h": "60",
+        "model": "XGBoost model 1",
+        "metric": "PR-AUC",
+        "value": "0.970",
+        "secondary": "F1 0.889",
+        "note": ""
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "above",
+        "h": "60",
+        "model": "XGBoost model 2",
+        "metric": "PR-AUC",
+        "value": "0.968",
+        "secondary": "F1 0.890",
+        "note": "\u0394 vs Model 1 -0.002 [-0.003, -0.000]"
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "above",
+        "h": "60",
+        "model": "XGBoost model 3",
+        "metric": "PR-AUC",
+        "value": "0.972",
+        "secondary": "F1 0.896",
+        "note": "\u0394 vs Model 1 +0.002 [+0.001, +0.003]"
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "crossing",
+        "h": "60",
+        "model": "XGBoost model 1",
+        "metric": "PR-AUC",
+        "value": "0.837",
+        "secondary": "F1 0.672",
+        "note": ""
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "crossing",
+        "h": "60",
+        "model": "XGBoost model 2",
+        "metric": "PR-AUC",
+        "value": "0.838",
+        "secondary": "F1 0.667",
+        "note": "\u0394 vs Model 1 +0.001 [-0.003, +0.006]"
+      },
+      {
+        "task": "Ablation (B)",
+        "target": "crossing",
+        "h": "60",
+        "model": "XGBoost model 3",
+        "metric": "PR-AUC",
+        "value": "0.839",
+        "secondary": "F1 0.679",
+        "note": "\u0394 vs Model 1 +0.002 [-0.003, +0.007]"
+      },
+      {
+        "task": "C. Condition",
+        "target": "M5 vibration",
+        "h": "\u2014",
+        "model": "ewma",
+        "metric": "detection day",
+        "value": "2.08",
+        "secondary": "healthy per-bin FPR 0.02%",
+        "note": "healthy machines alarmed: none"
+      },
+      {
+        "task": "C. Condition",
+        "target": "M5 vibration",
+        "h": "\u2014",
+        "model": "isolation_forest",
+        "metric": "detection day",
+        "value": "2.12",
+        "secondary": "healthy per-bin FPR 1.03%",
+        "note": "healthy machines alarmed: none"
+      }
+    ],
+    "deep_learning": "Not attempted. It is optional in the Day 6 brief and was to be attempted only after Tasks 1, 2, 3 and 5."
+  },
   "exposure": {
     "dates": [
       "2026-10-20",
@@ -784,7 +1509,17 @@
       },
       "min": 11.049083997064573,
       "median": 71.68429966473596,
-      "max": 82.19519394804497
+      "max": 82.19519394804497,
+      "worst_bands": {
+        "High": 121,
+        "Medium": 18,
+        "Low": 1
+      },
+      "worst_components": {
+        "heat": 135,
+        "respiratory": 5
+      },
+      "worst_band_higher": 24
     }
   }
 }

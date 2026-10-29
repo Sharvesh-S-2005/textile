@@ -178,8 +178,9 @@ Figure: `docs/figures/ablation_skill.png` (forecast skill with 95% bootstrap bar
 
 **On this dataset, machine and zone-history data (Model 3) give a small but
 statistically distinguishable improvement in *noise* forecasting over environmental
-data alone. Worker-specific data (Model 2) adds nothing distinguishable to any task,
-and neither set improves dust or heat forecasting or exceedance classification.**
+data alone. Worker-specific data (Model 2) adds nothing of practical size to any task
+(at most +0.007 skill, under 0.1 dB of MAE), and neither set improves dust or heat
+forecasting or exceedance classification in any practical sense.**
 
 ### What the numbers show
 

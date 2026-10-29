@@ -16,6 +16,7 @@ Outputs:
   docs/figures/zone_hour_heatmap.png        mean noise by zone and hour
   docs/figures/localisation_confusion.png   Day 2 localisation confusion matrix
   docs/results_forecast.md, docs/results_exposure.md, docs/results_summary.md
+  docs/results_ml.md, docs/model_cards.md   via ml/report_ml.py (from the saved ML metrics)
 """
 
 from __future__ import annotations
@@ -45,7 +46,8 @@ import matplotlib.dates as mdates  # noqa: E402
 from db.repo import Repo, from_epoch_ms  # noqa: E402
 from exposure.noise import l_aeq, l_ex_8h  # noqa: E402
 from exposure.personal import UNKNOWN_ZONE, ExposureParams, personal_exposure_for_session  # noqa: E402
-from ml import explain, forecast  # noqa: E402
+from exposure.risk_index import RiskParams, worst_component  # noqa: E402
+from ml import explain, forecast, report_ml  # noqa: E402
 
 FIG = ROOT / config.get_paths()["figures_dir"]
 DOCS = ROOT / "docs"
@@ -243,6 +245,9 @@ def test_count() -> int | None:
     return int(m.group(1)) if m else None
 
 
+_BAND_ORDER = {"Low": 0, "Medium": 1, "High": 2}
+
+
 def exposure_numbers(repo: Repo) -> dict[str, Any]:
     """Distribution, exceedance counts, coverage and zone drivers from the materialised tables."""
     shift = repo.get_exposure_rows("personal_exposure_shift")
@@ -267,6 +272,8 @@ def exposure_numbers(repo: Repo) -> dict[str, Any]:
                          statistics.fmean(r["pm25_twa_raw"] for r in rs), max(r["wbgt_max_c"] for r in rs), len(rs))
                         for zid, rs in by_zone.items()), key=lambda r: -r[2])
     rv = [r["overall_index"] for r in risk]
+    params = RiskParams.from_config(config.get_risk_index_config(), config.get_exposure_limits()["wbgt_limit_c"])
+    worst = [worst_component(r["components"], params) for r in risk]
     return {
         "dates": sorted({r["shift_date"] for r in shift}), "sessions": len(shift), "valid": len(valid),
         "dist": dist,
@@ -282,7 +289,11 @@ def exposure_numbers(repo: Repo) -> dict[str, Any]:
         "zones": zone_rows,
         "risk": {"n": len(risk), "bands": dict(Counter(r["band"] for r in risk)),
                  "min": min(rv) if rv else None, "median": statistics.median(rv) if rv else None,
-                 "max": max(rv) if rv else None},
+                 "max": max(rv) if rv else None,
+                 "worst_bands": dict(Counter(w["band"] for w in worst)),
+                 "worst_components": dict(Counter(w["component"] for w in worst)),
+                 "worst_band_higher": sum(_BAND_ORDER[w["band"]] > _BAND_ORDER.get(r["band"], -1)
+                                          for w, r in zip(worst, risk))},
         "engine_versions": sorted({r["engine_version"] for r in shift}),
     }
 
@@ -392,6 +403,31 @@ def write_summary_md(path: Path, nums: dict[str, Any]) -> None:
     r = e["risk"]
     L.append(f"| Risk index | Bands over {r['n']} worker-days (deterministic_index; weights a design choice) | "
              + ", ".join(f"{k} {v}" for k, v in sorted(r["bands"].items())) + " | worker_risk_index |")
+    L.append(f"| Risk index | Worst single component, shown beside the composite: bands | "
+             + ", ".join(f"{k} {v}" for k, v in sorted(r["worst_bands"].items()))
+             + f"; worst band above the composite band on {r['worst_band_higher']} worker-days | worker_risk_index |")
+    ml = nums.get("ml")
+    if ml:
+        c = ml["classification"]["runs"]
+        for key in ("above_h30", "crossing_h30", "crossing_h60"):
+            e = c[key]
+            x, pp = e["test"][e["chosen"]], e["test"]["persistence"]
+            L.append(f"| Classification | {key}: prevalence; PR-AUC {e['chosen']} vs persistence; F1 | "
+                     f"{100 * x['prevalence']:.1f}%; **{x['pr_auc']:.3f}** vs {pp['pr_auc']:.3f}; {x['f1']:.3f} | "
+                     "classification_metrics.json |")
+        a = ml["ablation"]["forecasting"]
+        for key in ("noise_dba_h30", "noise_dba_h60"):
+            d = a[key]["differences"]["model_3_vs_model_1"]
+            d2 = a[key]["differences"]["model_2_vs_model_1"]
+            L.append(f"| Ablation | {key}: skill Model 3 − Model 1 [95% CI]; Model 2 − Model 1 | "
+                     f"**{d['point']:+.3f}** [{d['lo']:+.3f}, {d['hi']:+.3f}]; {d2['point']:+.3f} "
+                     f"[{d2['lo']:+.3f}, {d2['hi']:+.3f}] | ablation_metrics.json |")
+        an = ml["anomaly"]
+        bad = [k for k, v in an["machines"].items() if v["configured_degrading"]][0]
+        L.append(f"| Anomaly | {bad} detection day EWMA / isolation forest; healthy per-bin FPR | "
+                 f"**{an['machines'][bad]['ewma']['alarm_day']:.2f} / {an['machines'][bad]['isolation_forest']['alarm_day']:.2f}**; "
+                 f"{100 * an['healthy_summary']['ewma']['flag_rate']:.2f}% / "
+                 f"{100 * an['healthy_summary']['isolation_forest']['flag_rate']:.2f}% | anomaly_metrics.json |")
     L += ["", "Negative findings are kept: at 60 min neither ML model beats the seasonal baseline for noise, and "
           "for WBGT the seasonal baseline is worse than persistence (`results_forecast.md`)."]
     path.write_text("\n".join(L) + "\n", encoding="utf-8")
@@ -443,6 +479,32 @@ def write_numbers_sheet(path: Path, nums: dict[str, Any]) -> None:
              f"India** above 100% dose; coverage {e['coverage_mean']:.1f}%, unaccounted {e['unaccounted_mean']:.2f}% |")
     L.append(f"| Risk index (deterministic, design choice) | " + ", ".join(f"{k} {v}" for k, v in sorted(r["bands"].items()))
              + f"; median {r['median']:.0f}/100 — a loud mill, not a calibration fault |")
+    L.append(f"| Risk index, worst single component | Shown beside the composite; worst band above the composite band "
+             f"on **{r['worst_band_higher']} of {r['n']}** worker-days (components are not on commensurable scales) |")
+    ml = nums.get("ml")
+    if ml:
+        c = ml["classification"]["runs"]
+        ab, cr30, cr60 = (c[k]["test"][c[k]["chosen"]] for k in ("above_h30", "crossing_h30", "crossing_h60"))
+        L.append(f"| Exceedance classification (90 dBA) | `above`: prevalence {100 * ab['prevalence']:.0f}%, PR-AUC "
+                 f"**{ab['pr_auc']:.2f}** vs persistence {c['above_h30']['test']['persistence']['pr_auc']:.2f}. "
+                 f"`crossing`: prevalence {100 * cr30['prevalence']:.0f}%, PR-AUC **{cr30['pr_auc']:.2f} / "
+                 f"{cr60['pr_auc']:.2f}** (t+30 / t+60), persistence cannot predict it |")
+        st30 = c["crossing_h30"]["by_schedule"]["steady"][c["crossing_h30"]["chosen"]]["pr_auc"]
+        st60 = c["crossing_h60"]["by_schedule"]["steady"][c["crossing_h60"]["chosen"]]["pr_auc"]
+        L.append(f"| Crossing, break-free windows | PR-AUC **{st30:.2f} / {st60:.2f}** — the honest figure; Z2 "
+                 "(near 90 dBA) barely beats chance |")
+        a = ml["ablation"]["forecasting"]
+        d30, d60 = (a[k]["differences"]["model_3_vs_model_1"] for k in ("noise_dba_h30", "noise_dba_h60"))
+        L.append(f"| Objective 6 ablation | Machine + history data (Model 3) improve noise skill by **{d30['point']:+.3f} / "
+                 f"{d60['point']:+.3f}** (95% CIs exclude 0); worker data (Model 2) adds at most "
+                 f"{a['noise_dba_h30']['differences']['model_2_vs_model_1']['point']:+.3f} (under 0.1 dB); "
+                 "no practical gain for dust, heat or classification |")
+        an = ml["anomaly"]
+        bad = [k for k, v in an["machines"].items() if v["configured_degrading"]][0]
+        L.append(f"| Machine condition | {bad} flagged on day **{an['machines'][bad]['ewma']['alarm_day']:.2f}** (EWMA) / "
+                 f"{an['machines'][bad]['isolation_forest']['alarm_day']:.2f} (isolation forest); **no healthy machine "
+                 f"alarmed**; healthy false-positive rate {100 * an['healthy_summary']['ewma']['flag_rate']:.2f}% "
+                 f"vs {100 * an['healthy_summary']['isolation_forest']['flag_rate']:.2f}% |")
     L += ["", "**Say first:** simulated data · zone-weighted presence, not personal measurement · WBGT approximate "
           "(underestimate) · dust indicative · the index is a weighted design choice, not a clinical model."]
     path.write_text("\n".join(L) + "\n", encoding="utf-8")
@@ -491,6 +553,11 @@ def main(argv: list[str] | None = None) -> int:
             "score_day2": score_day2[0] if score_day2 else None, "score_week": week_score[0] if week_score else None,
             "consistency": consistency, "exposure": exposure, "forecast": results,
             "shap": load_json(ROOT / "data" / "shap_noise_h30.json")}
+    ml_metrics = report_ml.load_metrics()
+    if all(ml_metrics[k] is not None for k in ("classification", "ablation", "anomaly")):
+        nums["ml"] = ml_metrics
+        report_ml.write_results_ml(ml_metrics, DOCS / "text" / "results_ml_body.md", DOCS / "results_ml.md")
+        report_ml.write_model_cards(ml_metrics, DOCS / "model_cards.md")
     write_summary_md(DOCS / "results_summary.md", nums)
     write_numbers_sheet(DOCS / "numbers_sheet.md", nums)
     # Machine-readable copy for the dashboard (docs/ is committed; works with nothing running).
@@ -498,6 +565,10 @@ def main(argv: list[str] | None = None) -> int:
     slim["forecast"] = {"split_rule": results["split_rule"], "splits": results["splits"],
                         "targets": {k: {f: v[f] for f in ("metrics", "chosen", "by_schedule", "exceedance", "n_test")
                                         if f in v} for k, v in results["targets"].items()}}
+    slim.pop("ml", None)
+    if "ml" in nums:
+        slim["ml"] = {"comparison": report_ml.comparison_rows(nums["ml"]),
+                      "deep_learning": report_ml.deep_learning_text(nums["ml"].get("deep"))}
     slim["exposure"] = {k: exposure[k] for k in ("dates", "valid", "over_100_niosh", "over_100_india", "coverage_mean",
                                                  "unaccounted_mean", "risk")}
     (DOCS / "results_numbers.json").write_text(json.dumps(slim, indent=2, default=str), encoding="utf-8")

@@ -26,5 +26,6 @@ navigation = st.navigation([
     st.Page(str(VIEWS / "worker_drilldown.py"), title="Worker Drilldown", default=True),
     st.Page(str(VIEWS / "live_zones.py"), title="Live Zones"),
     st.Page(str(VIEWS / "system_results.py"), title="System & Results"),
+    st.Page(str(VIEWS / "models.py"), title="Models"),
 ])
 navigation.run()

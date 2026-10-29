@@ -593,3 +593,44 @@ by default, with no broker and no simulator.
 
 Hardware bring-up and calibration (handheld sound-level meter, reference dust sampler,
 BLE calibration walks), questionnaire labels, TimescaleDB migration.
+
+---
+
+## Day 6 — ML depth: classification, the ablation, anomaly detection (2026-10-29)
+
+### What was built
+
+| Commit | Piece |
+|---|---|
+| 1ffcd89 | **Exceedance classification** (`ml/classify_exceedance.py`): will zone noise at t+30/t+60 be ≥ 90 dBA? Label = the measured future level (not circular). Variants `above` and `crossing`; persistence classifier baseline; logistic regression, random forest, XGBoost grid-searched on the validation day; threshold = highest recall with FPR ≤ 10% (config). Prevalence before every metric; PR-AUC leads; steady vs schedule-transition breakdown; per-zone appendix. |
+| d3c1010 | **Model 1/2/3 ablation** (`ml/ablation.py`, Objective 6), reframed onto forecasting and classification. Strictly nested feature sets as explicit column lists; one model class and seed; each set tuned separately; moving-block bootstrap on paired differences; per-zone breakdown. |
+| e968ff5 | **Machine condition monitoring** (`ml/anomaly.py`): EWMA control chart and isolation forest per machine, each calibrated on its own first day; lead-lag M5 → Z5 noise. |
+| (Task 5) | `ml/report_ml.py` → `docs/results_ml.md` (consolidated, with the model comparison table) and `docs/model_cards.md`, both generated from the saved metrics. Risk index **worst single component** beside the composite on the drilldown. Dashboard **Models** page (reads saved artefacts only). Results pack and numbers sheet extended. |
+
+### Headline findings (all simulated, one test day)
+
+- **Classification.** `above`: XGBoost PR-AUC 0.97 vs persistence 0.67 (prevalence 40%).
+  `crossing`: PR-AUC 0.83–0.84 vs 0.16 for persistence. On break-free windows it is
+  0.69 / 0.77, and in Z2, which hovers near 90 dBA, it barely beats chance.
+- **Ablation.** Model 3 (machine + zone history) improves noise forecast skill by
+  +0.017 / +0.028 (CIs exclude 0). Model 2 (worker data) adds at most +0.007. There is
+  no practical gain for dust, heat or classification.
+- **Anomaly.** M5 is flagged on day 2.08 (EWMA) and 2.12 (isolation forest). No healthy
+  machine alarms. Healthy per-bin FPR is 0.02% for EWMA against 1.03% for the forest,
+  so the control chart is the one to deploy.
+- **Risk index.** The worst component's band is above the composite band on 24 of 140
+  worker-days. That is the case the fix was for.
+
+### Honest gaps
+
+- Task 4 (LSTM/GRU): see `docs/results_ml.md` Section 6 for its status.
+- The ground-truth isolation guard (`tests/test_scoring.py`) caught the word "truth"
+  in `ml/anomaly.py`. The scoring label is `configured_degrading`, read from
+  `config.yaml`, never from simulator output files.
+- The Task 2 commit message says Model 2 adds "nothing distinguishable". Its +0.007 on
+  noise at t+30 *is* distinguishable, though negligible. The documents were corrected;
+  the commit message cannot be.
+- The machine-to-noise results (SHAP share, Model 3 gain, M5–Z5 analysis) reflect a
+  coupling the simulator builds in. The caveat is stated in each place.
+- One test day: no between-day variance estimate. The risk classifier is still
+  deferred pending questionnaire labels.

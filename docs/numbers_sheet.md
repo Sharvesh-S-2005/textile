@@ -4,7 +4,7 @@
 
 | Question | Answer |
 |---|---|
-| Tests | **380 pytest tests**, all passing (exit code checked directly) |
+| Tests | **430 pytest tests**, all passing (exit code checked directly) |
 | Data loss (Day 2, 8 h at 100×) | **49,979 published + 13 injected = 49,992 received = 49,979 stored + 13 rejected** — zero loss |
 | Ingest throughput | **173.6 msg/s** sustained (Day 2); 156.1 msg/s over the 7-day run (1,071,656 messages, zero loss) |
 | Worker localisation | **96.4%** of on-site worker-minutes in the right zone, median latency **30 s** (7 days: 96.3%) |
@@ -15,5 +15,10 @@
 | 90 dBA crossings warned | **36/36**, median lead **17–18.5 min**, false alarms **5–12%** (seasonal baseline 36–42%) |
 | Exposure, 140 worker-days | **90% NIOSH / 40% India** above 100% dose; coverage 99.1%, unaccounted 0.15% |
 | Risk index (deterministic, design choice) | High 110, Low 14, Medium 16; median 72/100 — a loud mill, not a calibration fault |
+| Risk index, worst single component | Shown beside the composite; worst band above the composite band on **24 of 140** worker-days (components are not on commensurable scales) |
+| Exceedance classification (90 dBA) | `above`: prevalence 40%, PR-AUC **0.97** vs persistence 0.67. `crossing`: prevalence 16%, PR-AUC **0.83 / 0.84** (t+30 / t+60), persistence cannot predict it |
+| Crossing, break-free windows | PR-AUC **0.69 / 0.77** — the honest figure; Z2 (near 90 dBA) barely beats chance |
+| Objective 6 ablation | Machine + history data (Model 3) improve noise skill by **+0.017 / +0.028** (95% CIs exclude 0); worker data (Model 2) adds at most +0.007 (under 0.1 dB); no practical gain for dust, heat or classification |
+| Machine condition | M5 flagged on day **2.08** (EWMA) / 2.12 (isolation forest); **no healthy machine alarmed**; healthy false-positive rate 0.02% vs 1.03% |
 
 **Say first:** simulated data · zone-weighted presence, not personal measurement · WBGT approximate (underestimate) · dust indicative · the index is a weighted design choice, not a clinical model.

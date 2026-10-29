@@ -9,7 +9,7 @@ from db.repo import Repo
 from exposure import engine
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGES = ["worker_drilldown.py", "live_zones.py", "system_results.py"]
+PAGES = ["worker_drilldown.py", "live_zones.py", "system_results.py", "models.py"]
 
 
 @pytest.fixture
@@ -67,6 +67,25 @@ def test_drilldown_shows_the_full_value_chain(dashboard_db: Path, monkeypatch: p
     assert "not a validated clinical model" in text                # the design-choice caveat
     assert "APPROXIMATE" in text and "INDICATIVE" in text
     assert "Rule 95" in text and "98-126" in text
+
+
+def test_drilldown_shows_the_worst_component_beside_the_composite(dashboard_db: Path,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    at = render("worker_drilldown.py", dashboard_db, monkeypatch)
+    text = text_of(at)
+    assert "Risk index" in text and "Worst single component" in text
+    assert "not on commensurable scales" in text
+
+
+def test_models_page_shows_the_comparison_table_and_caveats(dashboard_db: Path,
+                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    at = render("models.py", dashboard_db, monkeypatch)
+    assert not at.exception, at.exception
+    text = text_of(at)
+    assert "no model runs on this page" in text
+    assert "by construction" in text                               # simulator-coupling caveat
+    assert "risk classifier is deferred" in text
+    assert at.dataframe and len(at.dataframe[0].value) > 0
 
 
 def test_drilldown_defaults_to_the_highest_index_worker(dashboard_db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
