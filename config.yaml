@@ -555,6 +555,20 @@ ml:
     lead_lag_bin_min: 60
     lead_lag_max_lag_h: 12
     metrics_path: data/anomaly_metrics.json
+  # Optional deep sequence model (ml/deep_forecast.py, Day 6 Task 4). Modest by design:
+  # no architecture search. Compared against XGBoost on the ablation's Model 3 features.
+  deep:
+    targets: [noise_dba]
+    seq_len_min: 60                # the last 60 minutes of the Model 3 feature set
+    cell: gru
+    hidden: 64
+    layers: 1
+    batch_size: 512
+    learning_rate: 0.001
+    max_epochs: 30
+    patience: 4                    # early stopping on validation MAE
+    time_cap_min: 45               # brief's hard cap; recorded if hit
+    metrics_path: data/deep_forecast_metrics.json
 
 paths:
   db_path: data/textile_ohs.db

@@ -4,7 +4,7 @@
 
 | Question | Answer |
 |---|---|
-| Tests | **430 pytest tests**, all passing (exit code checked directly) |
+| Tests | **434 pytest tests**, all passing (exit code checked directly) |
 | Data loss (Day 2, 8 h at 100×) | **49,979 published + 13 injected = 49,992 received = 49,979 stored + 13 rejected** — zero loss |
 | Ingest throughput | **173.6 msg/s** sustained (Day 2); 156.1 msg/s over the 7-day run (1,071,656 messages, zero loss) |
 | Worker localisation | **96.4%** of on-site worker-minutes in the right zone, median latency **30 s** (7 days: 96.3%) |
@@ -20,5 +20,6 @@
 | Crossing, break-free windows | PR-AUC **0.69 / 0.77** — the honest figure; Z2 (near 90 dBA) barely beats chance |
 | Objective 6 ablation | Machine + history data (Model 3) improve noise skill by **+0.017 / +0.028** (95% CIs exclude 0); worker data (Model 2) adds at most +0.007 (under 0.1 dB); no practical gain for dust, heat or classification |
 | Machine condition | M5 flagged on day **2.08** (EWMA) / 2.12 (isolation forest); **no healthy machine alarmed**; healthy false-positive rate 0.02% vs 1.03% |
+| Deep learning (GRU, optional) | Noise skill **+0.52 / +0.68** vs XGBoost on the same features +0.76 / +0.79 — no advantage; the engineered lags already carry the temporal structure |
 
 **Say first:** simulated data · zone-weighted presence, not personal measurement · WBGT approximate (underestimate) · dust indicative · the index is a weighted design choice, not a clinical model.

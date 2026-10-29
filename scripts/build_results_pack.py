@@ -505,6 +505,13 @@ def write_numbers_sheet(path: Path, nums: dict[str, Any]) -> None:
                  f"{an['machines'][bad]['isolation_forest']['alarm_day']:.2f} (isolation forest); **no healthy machine "
                  f"alarmed**; healthy false-positive rate {100 * an['healthy_summary']['ewma']['flag_rate']:.2f}% "
                  f"vs {100 * an['healthy_summary']['isolation_forest']['flag_rate']:.2f}% |")
+        deep = ml.get("deep")
+        if deep and deep.get("status") == "completed":
+            t = deep["targets"]
+            L.append(f"| Deep learning (GRU, optional) | Noise skill **{t['noise_dba_h30']['test']['skill_vs_persistence']:+.2f} / "
+                     f"{t['noise_dba_h60']['test']['skill_vs_persistence']:+.2f}** vs XGBoost on the same features "
+                     f"{t['noise_dba_h30']['xgboost_skill']:+.2f} / {t['noise_dba_h60']['xgboost_skill']:+.2f} — "
+                     "no advantage; the engineered lags already carry the temporal structure |")
     L += ["", "**Say first:** simulated data · zone-weighted presence, not personal measurement · WBGT approximate "
           "(underestimate) · dust indicative · the index is a weighted design choice, not a clinical model."]
     path.write_text("\n".join(L) + "\n", encoding="utf-8")

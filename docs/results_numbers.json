@@ -1,5 +1,5 @@
 {
-  "tests": 430,
+  "tests": 434,
   "day2_run": {
     "published": 49979,
     "by_type": {
@@ -1481,9 +1481,29 @@
         "value": "2.12",
         "secondary": "healthy per-bin FPR 1.03%",
         "note": "healthy machines alarmed: none"
+      },
+      {
+        "task": "A. Forecast (deep)",
+        "target": "noise_dba",
+        "h": "30",
+        "model": "GRU (1\u00d764)",
+        "metric": "skill vs persistence",
+        "value": "+0.518",
+        "secondary": "MAE 3.89",
+        "note": "XGBoost Model 3 +0.760"
+      },
+      {
+        "task": "A. Forecast (deep)",
+        "target": "noise_dba",
+        "h": "60",
+        "model": "GRU (1\u00d764)",
+        "metric": "skill vs persistence",
+        "value": "+0.676",
+        "secondary": "MAE 2.63",
+        "note": "XGBoost Model 3 +0.787"
       }
     ],
-    "deep_learning": "Not attempted. It is optional in the Day 6 brief and was to be attempted only after Tasks 1, 2, 3 and 5."
+    "deep_learning": "GRU (1\u00d764) over the last 60 minutes of the Model 3 feature set, same split and test rows (noise_dba_h30: GRU skill +0.518 (MAE 3.89) against XGBoost on the same features +0.760 (MAE 1.94); noise_dba_h60: GRU skill +0.676 (MAE 2.63) against XGBoost on the same features +0.787 (MAE 1.73)). Deep sequence models offered no advantage over gradient boosting on this dataset, likely because the engineered lag features already capture the temporal structure. Details: `results_deep_forecast.md`."
   },
   "exposure": {
     "dates": [

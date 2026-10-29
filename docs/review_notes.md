@@ -605,7 +605,7 @@ BLE calibration walks), questionnaire labels, TimescaleDB migration.
 | 1ffcd89 | **Exceedance classification** (`ml/classify_exceedance.py`): will zone noise at t+30/t+60 be ≥ 90 dBA? Label = the measured future level (not circular). Variants `above` and `crossing`; persistence classifier baseline; logistic regression, random forest, XGBoost grid-searched on the validation day; threshold = highest recall with FPR ≤ 10% (config). Prevalence before every metric; PR-AUC leads; steady vs schedule-transition breakdown; per-zone appendix. |
 | d3c1010 | **Model 1/2/3 ablation** (`ml/ablation.py`, Objective 6), reframed onto forecasting and classification. Strictly nested feature sets as explicit column lists; one model class and seed; each set tuned separately; moving-block bootstrap on paired differences; per-zone breakdown. |
 | e968ff5 | **Machine condition monitoring** (`ml/anomaly.py`): EWMA control chart and isolation forest per machine, each calibrated on its own first day; lead-lag M5 → Z5 noise. |
-| (Task 5) | `ml/report_ml.py` → `docs/results_ml.md` (consolidated, with the model comparison table) and `docs/model_cards.md`, both generated from the saved metrics. Risk index **worst single component** beside the composite on the drilldown. Dashboard **Models** page (reads saved artefacts only). Results pack and numbers sheet extended. |
+| ba7aeef | `ml/report_ml.py` → `docs/results_ml.md` (consolidated, with the model comparison table) and `docs/model_cards.md`, both generated from the saved metrics. Risk index **worst single component** beside the composite on the drilldown. Dashboard **Models** page (reads saved artefacts only). Results pack and numbers sheet extended. |
 
 ### Headline findings (all simulated, one test day)
 
@@ -623,7 +623,11 @@ BLE calibration walks), questionnaire labels, TimescaleDB migration.
 
 ### Honest gaps
 
-- Task 4 (LSTM/GRU): see `docs/results_ml.md` Section 6 for its status.
+- **Task 4 (GRU), done as a negative result.** One GRU layer over the last 60 min of the
+  Model 3 features, noise only, with no architecture search. Skill +0.52 / +0.68 against
+  XGBoost +0.76 / +0.79 on identical rows; it trained in 4.7 min, inside the 45-min cap.
+  This needed **`torch` (CPU build), added to `requirements.txt`** (Task 4 only; nothing
+  else imports it, and its tests skip without it).
 - The ground-truth isolation guard (`tests/test_scoring.py`) caught the word "truth"
   in `ml/anomaly.py`. The scoring label is `configured_degrading`, read from
   `config.yaml`, never from simulator output files.

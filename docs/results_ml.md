@@ -68,7 +68,7 @@ The machine-data gain is bounded by the simulator-coupling caveat (Section 8).
 
 ## 6. Deep learning (Task 4)
 
-Not attempted. It is optional in the Day 6 brief and was to be attempted only after Tasks 1, 2, 3 and 5.
+GRU (1×64) over the last 60 minutes of the Model 3 feature set, same split and test rows (noise_dba_h30: GRU skill +0.518 (MAE 3.89) against XGBoost on the same features +0.760 (MAE 1.94); noise_dba_h60: GRU skill +0.676 (MAE 2.63) against XGBoost on the same features +0.787 (MAE 1.73)). Deep sequence models offered no advantage over gradient boosting on this dataset, likely because the engineered lag features already capture the temporal structure. Details: `results_deep_forecast.md`.
 
 ## 7. Model comparison table (test day 2026-10-26)
 
@@ -149,6 +149,8 @@ Baselines are listed in the same table as the models they must beat.
 | Ablation (B) | crossing | 60 | XGBoost model 3 | PR-AUC | **0.839** | F1 0.679 | Δ vs Model 1 +0.002 [-0.003, +0.007] |
 | C. Condition | M5 vibration | — | ewma | detection day | **2.08** | healthy per-bin FPR 0.02% | healthy machines alarmed: none |
 | C. Condition | M5 vibration | — | isolation_forest | detection day | **2.12** | healthy per-bin FPR 1.03% | healthy machines alarmed: none |
+| A. Forecast (deep) | noise_dba | 30 | GRU (1×64) | skill vs persistence | **+0.518** | MAE 3.89 | XGBoost Model 3 +0.760 |
+| A. Forecast (deep) | noise_dba | 60 | GRU (1×64) | skill vs persistence | **+0.676** | MAE 2.63 | XGBoost Model 3 +0.787 |
 
 ## 8. Limitations
 
