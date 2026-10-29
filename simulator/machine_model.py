@@ -14,6 +14,10 @@ as proportional to vibration RMS - a deliberately mild coupling; see
 The current and vibration channels have occasional `stale`/`error` episodes
 (contract v1.1d). A faulted channel publishes `null`; with the current channel down,
 `running` repeats the node's last decision because the node cannot measure it.
+
+Day 8: `attach_stochastics` adds unplanned stops, uneven shift starts and variable load
+on top of the calendar (simulator/machine_stochastics.py). Without it, behaviour is
+exactly the deterministic model above.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ import numpy as np
 
 import config
 from simulator.faults import SensorFaults
+from simulator.machine_stochastics import MachineStochastics
 from shifts import ShiftSchedule
 
 CHANNELS: tuple[str, ...] = ("current", "vibration")
@@ -71,6 +76,23 @@ class MachineModel:
         self._last_ts: datetime | None = None
         self._last_reported_running = False
         self.running_now = False  # physical state, for the zone noise coupling
+        self._stoch: MachineStochastics | None = None   # Day 8; None = deterministic behaviour
+
+    def attach_stochastics(self, stochastics: MachineStochastics) -> None:
+        """Add unplanned stops, uneven shift starts and variable load (machine_stochastics.py)."""
+        self._stoch = stochastics
+
+    def _should_run(self, ts: datetime) -> bool:
+        """Deterministic calendar, then (if attached) the stochastic layer on top of it."""
+        scheduled = self.scheduled_on(ts)
+        if self._stoch is None:
+            return scheduled
+        t = ts - self._lag
+        shift = self._schedule.active_at(t)
+        since = None
+        if shift is not None:
+            since = (t - shift.start).total_seconds() / 60.0 - self._d["changeover_min"]
+        return self._stoch.running(ts, scheduled, since, shift.start if shift is not None else None)
 
     @classmethod
     def from_config(
@@ -118,7 +140,8 @@ class MachineModel:
         if self._on_since is None:
             # Already running when the simulation starts: no start-up, so no inrush.
             self._on_since = ts - timedelta(days=1) if self._first_reading else ts
-        current = self._rated_a * (1.0 + self._d["current_noise_fraction"] * self._rng.standard_normal())
+        load = 1.0 if self._stoch is None else self._stoch.load
+        current = self._rated_a * load * (1.0 + self._d["current_noise_fraction"] * self._rng.standard_normal())
         inrush = self._d["inrush"]
         if (ts - self._on_since).total_seconds() < inrush["duration_s"]:
             current *= self._rng.uniform(inrush["multiplier"]["min"], inrush["multiplier"]["max"])
@@ -135,7 +158,7 @@ class MachineModel:
         Also updates `running_now`, the machine's true physical state, which the
         publisher uses for the zone noise coupling whatever the sensors report.
         """
-        current = self._current(ts, self.scheduled_on(ts))
+        current = self._current(ts, self._should_run(ts))
         self._first_reading = False
         running = current > self._d["running_threshold_fraction"] * self._rated_a
         self.running_now = bool(running)

@@ -1,0 +1,160 @@
+{
+  "start": "2026-10-20T00:10:00+00:00",
+  "end": "2026-10-27T03:50:00+00:00",
+  "seed": 42,
+  "step_s": 10,
+  "availability": {
+    "M1": {
+      "zone_id": "Z1",
+      "type": "blowroom",
+      "availability": 0.8292682926829268,
+      "band": [
+        0.8,
+        0.93
+      ],
+      "in_band": true,
+      "scheduled_h": 150.33333333333334
+    },
+    "M2": {
+      "zone_id": "Z2",
+      "type": "carding",
+      "availability": 0.8432372505543237,
+      "band": [
+        0.8,
+        0.93
+      ],
+      "in_band": true,
+      "scheduled_h": 150.33333333333334
+    },
+    "M3": {
+      "zone_id": "Z4",
+      "type": "ring_spinning",
+      "availability": 0.8726533628972654,
+      "band": [
+        0.85,
+        0.95
+      ],
+      "in_band": true,
+      "scheduled_h": 150.33333333333334
+    },
+    "M4": {
+      "zone_id": "Z3",
+      "type": "drawing",
+      "availability": 0.907760532150776,
+      "band": [
+        0.85,
+        0.95
+      ],
+      "in_band": true,
+      "scheduled_h": 150.33333333333334
+    },
+    "M5": {
+      "zone_id": "Z5",
+      "type": "weaving",
+      "availability": 0.8394863266814486,
+      "band": [
+        0.78,
+        0.92
+      ],
+      "in_band": true,
+      "scheduled_h": 150.33333333333334
+    },
+    "M6": {
+      "zone_id": "Z5",
+      "type": "weaving",
+      "availability": 0.8109940872135994,
+      "band": [
+        0.78,
+        0.92
+      ],
+      "in_band": true,
+      "scheduled_h": 150.33333333333334
+    },
+    "M7": {
+      "zone_id": "Z4",
+      "type": "ring_spinning",
+      "availability": 0.9228381374722838,
+      "band": [
+        0.85,
+        0.95
+      ],
+      "in_band": true,
+      "scheduled_h": 150.33333333333334
+    },
+    "M8": {
+      "zone_id": "Z6",
+      "type": "winding",
+      "availability": 0.8562638580931264,
+      "band": [
+        0.85,
+        0.95
+      ],
+      "in_band": true,
+      "scheduled_h": 150.33333333333334
+    }
+  },
+  "onset_alignment": {
+    "n_onsets": 1144,
+    "pearson_r": -0.013080087521900829,
+    "share_of_onsets_near_boundary": 0.1888111888111888,
+    "share_of_running_minutes_near_boundary": 0.20366532126104506,
+    "ratio": 0.9270659709866994,
+    "boundary_window_min": 10
+  },
+  "dependency_fired": 65,
+  "stops": {
+    "M1": {
+      "unplanned": 84,
+      "forced": 0
+    },
+    "M2": {
+      "unplanned": 36,
+      "forced": 65
+    },
+    "M3": {
+      "unplanned": 51,
+      "forced": 0
+    },
+    "M4": {
+      "unplanned": 129,
+      "forced": 0
+    },
+    "M5": {
+      "unplanned": 304,
+      "forced": 0
+    },
+    "M6": {
+      "unplanned": 298,
+      "forced": 0
+    },
+    "M7": {
+      "unplanned": 47,
+      "forced": 0
+    },
+    "M8": {
+      "unplanned": 195,
+      "forced": 0
+    }
+  },
+  "noise_effect": {
+    "zone": "Z5",
+    "by_machines_running": {
+      "0": {
+        "n_readings": 1539,
+        "l_aeq_dba": 75.25066573590802
+      },
+      "1": {
+        "n_readings": 15566,
+        "l_aeq_dba": 97.73677657688978
+      },
+      "2": {
+        "n_readings": 36509,
+        "l_aeq_dba": 100.75311686225638
+      }
+    },
+    "n_stops_measured": 236,
+    "median_drop_db": 3.1168848806466585,
+    "median_recovery_db": 3.0671769705953125,
+    "share_of_stops_lowering_noise": 0.8983050847457628
+  }
+}

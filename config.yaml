@@ -82,6 +82,77 @@ simulation:
       duration_min: {min: 2, max: 10}
       kinds: [stale, error]
 
+  # Stochastic machine behaviour (Day 8; simulator/machine_stochastics.py). PRE-REGISTERED
+  # in docs/preregistration_day8.md and committed before any evaluation was run. Values
+  # come from mill characteristics, never from ML results. Each is marked:
+  #   [literature]  - from published mill practice
+  #   [assumption]  - a stated assumption of this project, NOT a citation
+  # Off by default: the deterministic simulator stays the default and is kept intact;
+  # the stochastic dataset is generated with `--machine-stochastics`.
+  machine_stochastics:
+    enabled: false
+    # Machine type per zone. Z3 (drawing) and Z6 (winding) are not in the Day 8 brief's
+    # table; they get stops too, so no zone stays clock-driven. [assumption]
+    zone_machine_type: {Z1: blowroom, Z2: carding, Z3: drawing, Z4: ring_spinning, Z5: weaving, Z6: winding}
+    # Unplanned stops: inter-arrival ~ Exponential(mean_run_min_between_stops), counted in
+    # RUNNING time; duration ~ Lognormal(median_min, sigma). Unplanned-stop availability
+    # = mean_gap / (mean_gap + median * exp(sigma^2 / 2)).
+    # target_availability is the band the MEASURED total availability (running time /
+    # baseline scheduled time, including late and skipped starts) must fall in.
+    types:
+      weaving:          # warp break, weft break, pick fault; weaver mends in a few minutes
+        target_availability: [0.78, 0.92]    # [literature] modern loom efficiency 78-92%
+        mean_run_min_between_stops: 25       # [assumption] split of the band into rate x duration
+        stop_duration_median_min: 3.0        # [assumption]
+        stop_duration_sigma: 0.8             # [assumption]
+      ring_spinning:    # doffing stops the frame; end breaks are pieced up without stopping it
+        target_availability: [0.85, 0.95]    # [assumption]
+        mean_run_min_between_stops: 150      # [assumption] doff interval
+        stop_duration_median_min: 10.0       # [assumption] doff time
+        stop_duration_sigma: 0.4             # [assumption] doffing is fairly regular
+      blowroom:         # lap change, choke, cleaning
+        target_availability: [0.80, 0.93]    # [assumption]
+        mean_run_min_between_stops: 90       # [assumption]
+        stop_duration_median_min: 8.0        # [assumption]
+        stop_duration_sigma: 0.9             # [assumption] chokes are occasionally long
+      carding:          # flat cleaning, sliver breaks; ALSO starved by blowroom chokes (below)
+        target_availability: [0.80, 0.93]    # [assumption]
+        # Was 120: measured carding availability 0.797 / 0.794, just below the band, because
+        # starvation losses were underestimated. Raised once, BEFORE any evaluation, to put
+        # the measured value in its band (recorded in the pre-registration). [assumption]
+        mean_run_min_between_stops: 180
+        stop_duration_median_min: 8.0        # [assumption]
+        stop_duration_sigma: 0.9             # [assumption]
+      drawing:          # can change, sliver break
+        target_availability: [0.85, 0.95]    # [assumption]
+        mean_run_min_between_stops: 60       # [assumption]
+        stop_duration_median_min: 4.0        # [assumption]
+        stop_duration_sigma: 0.7             # [assumption]
+      winding:          # package doff, yarn break, splicer fault
+        target_availability: [0.85, 0.95]    # [assumption]
+        mean_run_min_between_stops: 45       # [assumption]
+        stop_duration_median_min: 3.0        # [assumption]
+        stop_duration_sigma: 0.7             # [assumption]
+    # Shift starts (every machine, every shift): an independent offset after the existing
+    # changeover, and a chance of a late start or no start at all (order gap, planned
+    # maintenance). [assumption]
+    shift_start:
+      offset_max_min: 8
+      late_probability: 0.10
+      late_extra_min: [15, 60]
+      skip_probability: 0.02
+    # Variable load: current = rated x load, load a reflected random walk (yarn count,
+    # fabric changes). Changes CURRENT only, not zone noise: noise follows stops, which
+    # is what the brief specifies; a load-noise coupling would be an invention. [assumption]
+    load:
+      bounds: [0.70, 1.00]
+      step_sd_per_min: 0.01
+    # Correlated stops: a blowroom stop longer than the chute buffer starves carding,
+    # which stops `buffer_min` after the blowroom does and restarts `restart_lag_min`
+    # after it restarts. [assumption]
+    dependencies:
+      - {upstream: M1, downstream: M2, buffer_min: 5, restart_lag_min: 2}
+
   # Parameters for simulator/worker_model.py.
   worker_dynamics:
     check_in_before_min: {min: 3, max: 15}

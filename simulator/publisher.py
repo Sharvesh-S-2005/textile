@@ -32,6 +32,7 @@ import paho.mqtt.client as mqtt
 
 import config
 from simulator.machine_model import MachineModel
+from simulator.machine_stochastics import Plant
 from simulator.profiles import ZoneProfile
 from shifts import ShiftSchedule
 from simulator.worker_model import WorkerModel
@@ -145,11 +146,14 @@ class Simulation:
     """Owns every model and turns each simulated tick into contract payloads."""
 
     def __init__(self, start: datetime, duration: timedelta, seed: int,
-                 outages: list[Outage] | None = None, whole_sessions_only: bool = False) -> None:
+                 outages: list[Outage] | None = None, whole_sessions_only: bool = False,
+                 machine_stochastics: bool = False) -> None:
         """Build all models from config.yaml for the window [start, start + duration).
 
         whole_sessions_only: simulate only crews whose whole session fits the window
         (set by --align-shifts).
+        machine_stochastics: add unplanned stops, uneven shift starts, variable load and
+        the stop dependency (simulator/machine_stochastics.py; Day 8).
         """
         self.start = start
         self.end = start + duration
@@ -181,6 +185,12 @@ class Simulation:
                                                whole_sessions_only=whole_sessions_only)
         self._ble_rng = root.spawn(1)[0]
         self._event_rng = root.spawn(1)[0]
+        # Spawned after every other stream, so the deterministic sequences are unchanged.
+        self.plant: Plant | None = None
+        if machine_stochastics:
+            self.plant = Plant(machines_cfg, self.sim["machine_stochastics"], root.spawn(1)[0])
+            for m in self.machines:
+                m.attach_stochastics(self.plant.for_machine(m.machine_id))
 
         self.zone_device = {z["zone_id"]: z["device_id"] for z in self.zones}
         self.device_ids = ([z["device_id"] for z in self.zones]
@@ -452,6 +462,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--no-outage", action="store_true", help="disable the outage demo")
     p.add_argument("--extra-outage", action="append", default=[], metavar="DEVICE:START_MIN:DURATION_MIN",
                    help="take any device offline as well, e.g. MN-M8:60:150 (repeatable)")
+    p.add_argument("--machine-stochastics", action=argparse.BooleanOptionalAction,
+                   default=bool(sim["machine_stochastics"]["enabled"]),
+                   help="unplanned stops, uneven shift starts, variable load (Day 8); default from config.yaml")
     p.add_argument("--ground-truth-out", type=Path, default=None,
                    help="write each worker's TRUE zone per BLE window to this JSONL file "
                         "(for scoring localisation; never published, never stored in the DB)")
@@ -501,7 +514,10 @@ def main(argv: list[str] | None = None) -> int:
         outages.append(outage)
         log.info("outage: %s offline %s -> %s", device_id, iso_z(outage.start), iso_z(outage.end))
 
-    simulation = Simulation(start, duration, args.seed, outages, whole_sessions_only=args.align_shifts)
+    simulation = Simulation(start, duration, args.seed, outages, whole_sessions_only=args.align_shifts,
+                            machine_stochastics=args.machine_stochastics)
+    if args.machine_stochastics:
+        log.info("machine stochastics ON (unplanned stops, uneven starts, variable load)")
     if args.dry_run:
         sink: Sink = DryRunSink()
     else:
