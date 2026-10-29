@@ -681,6 +681,9 @@ ml:
     time_cap_min: 45               # brief's hard cap; recorded if hit
     metrics_path: data/deep_forecast_metrics.json
 
+# Every path is relative to the repository root, which is on the D: drive
+# (D:/textile-ohs): databases, their WAL files and the ground-truth JSONL all live
+# under data/ there, so the C: drive is never a constraint on a long run (Day 8A).
 paths:
   db_path: data/textile_ohs.db
   model_dir: models/

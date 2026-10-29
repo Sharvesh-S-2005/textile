@@ -6,11 +6,8 @@
 # results; only the input database and the output locations differ, so the
 # deterministic outputs in data/ and docs/ are never overwritten.
 #
-# Prerequisite (already done; ~2 h at 90x through the real broker and ingest):
-#   python -m db.init_db --db data/week_stochastic/textile_ohs.db
-#   python -m ingest.subscriber --db data/week_stochastic/textile_ohs.db --time-reference stream --idle-exit-s 60
-#   python -m simulator.publisher --machine-stochastics --speed 90 --start 2026-10-20T06:00:00 \
-#       --duration-h 168 --seed 42 --ground-truth-out data/week_stochastic/truth.jsonl
+# Prerequisite: bash scripts/run_stochastic_generation.sh (~2.8 h at 60x through the real
+# broker and ingest; Day 8A restart settings in docs/preregistration_day8.md, Addendum A).
 #
 # Usage: bash scripts/run_stochastic_evaluation.sh   (from the repository root)
 set -euo pipefail
