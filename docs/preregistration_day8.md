@@ -140,3 +140,35 @@ anomaly detection.
 under realistic stoppages, and that is the answer to Objective 6 we report.** It will not
 be followed by a change of stoppage parameters, features or models in this phase. Every
 prediction that fails is reported as failed, with the best available explanation.
+
+---
+
+## Addendum A — 2026-10-29: restart of the generation run (appended; nothing above was edited)
+
+The first generation run was stopped by Claude Code at simulated 2026-10-22T11:00Z
+(about 2.4 of 7.15 days) because the machine was low on memory. It lost no data up
+to that point, but it cannot be resumed, so it was discarded **unevaluated**. No
+model was trained on it and no metric was computed from it. Day 8A measured the
+memory before anything was changed (`docs/review_notes.md`, Day 8A): no project
+process grows; the pressure came from other applications on the machine.
+
+Changes to how the run is executed. **None changes a parameter, a prediction or the
+evaluation plan:**
+
+1. **Speed 60 instead of 90.** The speed only paces the wall clock: every payload is a
+   function of simulated time and the seed. The only fields that differ are the
+   ingest receipt times, which no feature uses. Section 5 says 90; the run uses 60.
+2. **`--discard-session` on the subscriber.** The interrupted run left 4 messages queued
+   at the broker for the ingest client's persistent session. Without the purge they
+   would arrive first, move the stream watermark 2.4 days ahead, and flag every later
+   record `late_upload`. The deterministic dataset has no such flags. Purging restores
+   the same clean start the deterministic run had.
+3. **Memory caps and a WAL checkpoint** (Day 8A Task 2). The output is byte-identical:
+   the 48 h stochastic dry run and its ground truth, and the deterministic dry run, have
+   the same SHA-256 before and after these changes.
+4. **`OPENBLAS_NUM_THREADS=1` for the publisher.** The simulator uses no BLAS. This only
+   avoids about 480 MB of reserved buffers.
+
+The window, seed, start time, duration, outage, stochastic parameters and the
+unchunked single run are as pre-registered.
+`scripts/run_stochastic_generation.sh` is the exact command.

@@ -786,3 +786,19 @@ are in `config.yaml` (`simulation.memory_bounds`, `ingest`).
   59.0 → 59.0 MB, private 523.6 → 523.6 MB. A first version of the test kept every Z3
   payload in its own sink and showed +9 MB, which was the test's own growth, not the
   publisher's.
+
+### Task 3: reduce peak pressure
+
+- **3a Data on D:.** Already true: the repository is `D:/textile-ohs`, and every path in
+  `config.yaml` is relative to it. The database, WAL and ground truth are in
+  `data/week_stochastic/` on D:. The `paths` block now says so.
+- **3b Speed 60.** About 2.8 h for 168 simulated hours.
+  `scripts/run_stochastic_generation.sh` is the exact restart command (reset, purge the
+  stale session, subscriber, publisher). Speed only paces the wall clock, so the data
+  are unchanged.
+- **3c Other applications.** This needs the user. During the probe the browser held
+  about 2.7 GB and VS Code about 2.0 GB of 16 GB. Closing them is the most effective
+  single step, because the Task 1 probe showed the pressure comes from outside the
+  project.
+- The restart conditions are appended to `docs/preregistration_day8.md` as Addendum A
+  (dated; the original text is untouched).
