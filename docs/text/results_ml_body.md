@@ -33,32 +33,56 @@ Z7); 16% of below-criterion rows cross within the horizon.
 
 - `above`: XGBoost PR-AUC **0.97** against **0.67** for the persistence classifier;
   F1 0.89 against 0.76.
-- `crossing`: persistence cannot predict a crossing (PR-AUC = prevalence 0.16, recall 0).
-  XGBoost reaches PR-AUC **0.83–0.84**, recall 0.78–0.81 at a test-day false-positive
-  rate of 0.09–0.11. On **steady** rows this falls to **0.69 / 0.77**. In the borderline
-  carding zone (Z2), the models barely beat chance (PR-AUC 0.20–0.23 against a
-  prevalence of 0.18–0.19).
+- **`crossing`, read by zone group, leading with the zone that matters.** In carding
+  (Z2), which hovers at 90 dBA, **the classifier barely beats chance**: PR-AUC 0.22
+  against a base rate of 0.18, with false alarms on 44–53% of quiet minutes. Z2's
+  crossings are fluctuations, not schedule events. Across the borderline group
+  (Z2, Z3, Z6), PR-AUC is 0.18 against 0.08: about twice chance, and weak.
+- In the always-loud zones (Z1, Z4, Z5), 91–93% of quiet minutes are followed by a
+  restart, so prediction is trivial and a warning adds nothing. The pooled `crossing`
+  PR-AUC of **0.83–0.84** is driven by these zones and the office's certain negatives.
+  It is reported, but it is not the result.
 - Operating threshold: highest recall subject to FPR ≤ 10%, chosen on the validation
-  day. That is a stated policy that favours not missing hazardous exposure.
+  day. That is a stated policy that favours not missing hazardous exposure. It holds
+  pooled, but not per zone (Z2 runs at FPR 0.44–0.53).
 
 ## 4. The Model 1 / 2 / 3 ablation (Objective 6) — `results_ablation.md`
 
-**Answer to the objective:** on this dataset, machine and zone-history data (Model 3)
-improve noise forecasting over environmental data alone by a small but statistically
-distinguishable margin (skill +0.017 at 30 min and +0.028 at 60 min; 95%
-block-bootstrap intervals exclude zero). Worker-specific data (Model 2) adds nothing
-of practical size: +0.007 on noise at 30 min (under 0.1 dB of MAE), and elsewhere
-nothing distinguishable. Neither set improves dust or heat forecasting or exceedance
-classification in any practical sense.
+**Answer to the objective: negative on this dataset.** With dense target history,
+machine and worker data add +0.017 / +0.028 noise skill (95% CIs exclude zero). The Day 7
+redundancy analysis removed every target-derived column. The same features then add
+only **+0.014** noise skill (significant but about 0.1 dB of MAE) and nothing
+distinguishable for dust. With the timetable also removed, they add nothing at all
+(+0.001 to +0.008).
 
-The machine-data gain is bounded by the simulator-coupling caveat (Section 8).
+The information is redundant with the **timetable**, not mainly with the target's
+autocorrelation. A context-only model with **no noise input** (temperature, RH, CO2,
+time of day, shift, break, zone) already reaches noise skill **+0.76 / +0.77**, as high
+as the model with dense noise history. In this simulator machines run exactly when
+the schedule says.
+
+**Implication: sensor-failure resilience.** If a noise or PM sensor clogs, drifts or
+fails, zone hazard forecasting continues without it (noise +0.76 / +0.77, dust
++0.38 / +0.42 skill), carried mainly by the timetable, with machine state adding a
+little. On a real mill with unscheduled stops, machine state should matter more. That
+is a hypothesis for the hardware phase.
+
+The machine-data gain is also bounded by the simulator-coupling caveat (Section 8).
 
 ## 5. Machine condition monitoring (Task C) — `results_anomaly.md`
 
-- M5 (degrading) alarmed on **day 2.08** (EWMA chart) and **day 2.12** (isolation
-  forest), about 2% above its baseline. **No healthy machine ever alarmed.**
-- Healthy per-bin false-positive rate: **0.02%** (EWMA) against **1.03%** (isolation
-  forest). The simple control chart performs at least as well and is the one to deploy.
+**The simpler method was chosen on evidence.** Both detectors find the degrading
+machine (M5) within a day of each other: on **day 2.08** (EWMA control chart) and
+**day 2.12** (isolation forest), when its vibration was only about 2% above its own
+baseline. Neither raises an alarm on any of the seven healthy machines. But the EWMA
+chart flags healthy bins at **0.02%** against **1.03%** for the isolation forest: a
+false-positive rate more than **50× lower**. It is also the method a maintenance
+engineer already recognises: one statistic, one control limit and a documented
+in-control run length. The isolation forest detected nothing the chart missed and
+alarmed later. Its potential advantage, on faults that change the *shape* of
+vibration without moving its level, was not exercised by this simulator. The EWMA
+chart is therefore the deployed detector.
+
 - M5 → Z5 noise: no resolvable lead or lag in the hourly cross-correlation. The
   vibration alarm came 27.8 h before a noise alarm from the same chart: vibration is
   the more sensitive signal, which is not evidence of causation.

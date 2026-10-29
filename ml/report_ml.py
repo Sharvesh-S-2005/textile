@@ -95,6 +95,20 @@ def comparison_rows(m: dict[str, Any]) -> list[dict[str, str]]:
                 rows.append({"task": "Ablation (B)", "target": variant, "h": h,
                              "model": f"XGBoost {s.replace('_', ' ')}", "metric": "PR-AUC", "value": f"{x['pr_auc']:.3f}",
                              "secondary": f"F1 {x['f1'] or 0:.3f}", "note": note})
+    if a and "forecasting_nl" in a:
+        for block, task, sets, base in (("forecasting_nl", "Ablation (A, no lags)", ("model_1_nl", "model_3_nl"),
+                                         "model_1_nl"),
+                                        ("forecasting_ns", "Ablation (A, no lags/timetable)",
+                                         ("model_1_ns", "model_3_ns"), "model_1_ns")):
+            for key, e in a.get(block, {}).items():
+                target, h = _split(key)
+                for s in sets:
+                    x = e["test"][s]
+                    d = e["differences"].get(f"{s}_vs_{base}")
+                    note = "" if d is None else f"Δ vs {base} {d['point']:+.3f} [{d['lo']:+.3f}, {d['hi']:+.3f}]"
+                    rows.append({"task": task, "target": target, "h": h, "model": f"XGBoost {s}",
+                                 "metric": "skill vs persistence", "value": f"{x['skill_vs_persistence']:+.3f}",
+                                 "secondary": f"MAE {x['mae']:.2f}", "note": note})
     an = m["anomaly"]
     if an:
         bad = [k for k, v in an["machines"].items() if v["configured_degrading"]]
@@ -114,6 +128,30 @@ def comparison_rows(m: dict[str, Any]) -> list[dict[str, str]]:
             rows.append({"task": "A. Forecast (deep)", "target": target, "h": h, "model": d["model"],
                          "metric": "skill vs persistence", "value": f"{x['skill_vs_persistence']:+.3f}",
                          "secondary": f"MAE {x['mae']:.2f}", "note": f"XGBoost Model 3 {e['xgboost_skill']:+.3f}"})
+    return rows
+
+
+def zone_group_rows(m: dict[str, Any]) -> list[dict[str, Any]]:
+    """Classification by zone group for the dashboard: lead zone first, `crossing` before `above`."""
+    c = m.get("classification")
+    if not c or "zone_groups" not in c:
+        return []
+    groups = c["zone_groups"]
+    lead = next((g for g in groups if g.get("lead_zone")), None)
+    order = ([(f"{lead['name']}:{lead['lead_zone']}", lead["lead_zone"], lead["character"])] if lead else []) + [
+        (g["name"], ", ".join(g["zones"]), g["character"]) for g in groups]
+    rows = []
+    for key in sorted(c["runs"], key=lambda k: (k.startswith("above"), k)):
+        e = c["runs"][key]
+        if "by_zone_group" not in e:
+            continue
+        variant, h = _split(key)
+        for name, zones, character in order:
+            x = e["by_zone_group"][name][e["chosen"]]
+            rows.append({"variant": variant, "h": int(h), "group": name.split(":")[0], "zones": zones,
+                         "character": character, "n": x["n"], "prevalence": x["prevalence"], "pr_auc": x["pr_auc"],
+                         "lift": None if x["pr_auc"] is None else x["pr_auc"] / x["prevalence"],
+                         "recall": x["recall"], "precision": x["precision"], "fpr": x["fpr"]})
     return rows
 
 
@@ -222,8 +260,11 @@ def write_model_cards(m: dict[str, Any], out_path: Path) -> None:
                     else "noise below 90 dBA now and ≥ 90 dBA at t+h (a quiet zone about to become hazardous)")
             failure = ("High accuracy is mostly base rate in always-loud zones (Z1, Z4, Z5); read PR-AUC and prevalence."
                        if variant == "above" else
-                       "Much of the skill is restarts after scheduled breaks; on steady rows PR-AUC is lower, and in a "
-                       "zone hovering near 90 dBA (Z2) it is barely above chance.")
+                       "The pooled PR-AUC is driven by trivial restarts in always-loud zones and the office's certain "
+                       "negatives. In the borderline zones (Z2, Z3, Z6), where a warning matters, PR-AUC is about twice "
+                       "chance; in Z2 (carding, at the criterion) it barely beats chance, and one pooled threshold gives "
+                       "Z2 a false-alarm rate of 44–53%. Do not deploy as a Z2 warning without zone-specific "
+                       "thresholds and better features.")
             L += _card(f"Exceedance classifier, `{variant}` (`models/classify_{variant}_h{{30,60}}.pkl`)", [
                 ("Purpose", f"Warn that {what}."),
                 ("Inputs", f"The same {c['n_features']} features as the forecasters."),

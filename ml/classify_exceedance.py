@@ -300,6 +300,98 @@ def check_against_target_column(future: np.ndarray, target: np.ndarray) -> None:
         raise ValueError("future noise lookup disagrees with target_noise_dba_h* in the feature table")
 
 
+def zone_group_breakdown(predictions: pd.DataFrame, thresholds: dict[str, dict[str, float]],
+                         groups: list[dict[str, Any]]) -> dict[str, Any]:
+    """Test metrics pooled over each configured zone group (and its lead zone alone).
+
+    Reporting only: the same saved scores and thresholds, sliced by zone. A group with
+    one class only gets undefined AUCs, which classification_metrics reports as None.
+    """
+    out: dict[str, Any] = {}
+    for (variant, h), g in predictions.groupby(["variant", "horizon_min"]):
+        key = f"{variant}_h{h}"
+        out[key] = {}
+        for grp in groups:
+            parts = {grp["name"]: grp["zones"]}
+            if grp.get("lead_zone"):
+                parts[f"{grp['name']}:{grp['lead_zone']}"] = [grp["lead_zone"]]
+            for name, zones in parts.items():
+                sub = g[g["zone_id"].isin(zones)]
+                y = sub["label"].to_numpy()
+                out[key][name] = {m: classification_metrics(y, sub[f"score_{m}"].to_numpy(), thresholds[key][m])
+                                  for m in MODELS}
+    return out
+
+
+def zone_group_lines(results: dict[str, Any]) -> list[str]:
+    """Report section: classification per zone group, leading with the borderline lead zone."""
+    groups = results.get("zone_groups")
+    if not groups or not all("by_zone_group" in e for e in results["runs"].values()):
+        return []
+    lead = next(g for g in groups if g.get("lead_zone"))
+    lz = lead["lead_zone"]
+    runs = results["runs"]
+    cr = {h: runs[f"crossing_h{h}"] for h in (30, 60) if f"crossing_h{h}" in runs}
+
+    def z(h: int) -> dict[str, Any]:
+        e = cr[h]
+        return e["by_zone_group"][f"{lead['name']}:{lz}"][e["chosen"]]
+
+    L = ["## 2. Results by zone group — read this before the pooled numbers", ""]
+    if cr:
+        grp = {h: cr[h]["by_zone_group"][lead["name"]][cr[h]["chosen"]] for h in cr}
+        loud = next(g for g in groups if g["name"] == "always_loud")["name"]
+        ld = {h: cr[h]["by_zone_group"][loud][cr[h]["chosen"]] for h in cr}
+        L += [f"**The classifier barely beats chance in {lz}, the zone where a warning would matter most.** "
+              f"For `crossing` in {lz}, PR-AUC is "
+              + " and ".join(f"{z(h)['pr_auc']:.2f} against a base rate of {z(h)['prevalence']:.2f} at t+{h}"
+                             for h in sorted(cr))
+              + ", and at the chosen threshold it raises false alarms on "
+              + " / ".join(f"{z(h)['fpr']:.0%}" for h in sorted(cr))
+              + f" of quiet minutes (t+{' / t+'.join(str(h) for h in sorted(cr))}). {lz} hovers at the 90 dBA "
+              "criterion, so its crossings are driven by small fluctuations, not by the schedule, and that is "
+              "exactly the unpredictable case.", "",
+              f"**Across the whole borderline group ({', '.join(lead['zones'])})** PR-AUC is "
+              + " / ".join(f"{grp[h]['pr_auc']:.2f}" for h in sorted(cr)) + " against a base rate of "
+              + " / ".join(f"{grp[h]['prevalence']:.2f}" for h in sorted(cr))
+              + ": about twice chance, and weak in absolute terms (precision about 0.2).", ""]
+        h0 = sorted(cr)[0]
+        e0 = cr[h0]
+        ch = e0["chosen"]
+        pos_all = e0["test"][ch]["confusion"]["tp"] + e0["test"][ch]["confusion"]["fn"]
+        pos_loud = ld[h0]["confusion"]["tp"] + ld[h0]["confusion"]["fn"]
+        excl = [g["name"] for g in groups if g["name"] not in (lead["name"], loud)]
+        n_excl = sum(e0["by_zone_group"][n][ch]["n"] for n in excl)
+        L += [f"**Why the pooled `crossing` PR-AUC ({e0['test'][ch]['pr_auc']:.2f} at t+{h0}, Section 4) is high:** "
+              f"{pos_loud / pos_all:.0%} of its positives are restarts in the always-loud zones, where "
+              + " / ".join(f"{ld[h]['prevalence']:.0%}" for h in sorted(cr))
+              + f" of quiet minutes are followed by a restart, and the office contributes {n_excl / e0['n']['test']:.0%} "
+              "of the rows as certain negatives. Zone identity alone separates much of the pooled set. Prediction is "
+              "trivial in the loud zones, and a warning adds nothing there, because they are loud whenever the "
+              "machines run.", ""]
+    L += ["| Group | Zones | Character |", "|---|---|---|"]
+    L += [f"| {g['name']} | {', '.join(g['zones'])} | {g['character']} |" for g in groups]
+    L += ["", "Saved model per variant/horizon; thresholds as chosen on the validation day. PR-AUC of a "
+          "no-skill classifier equals the prevalence.", "",
+          "| Variant | h | Group | n | Prevalence | **PR-AUC** | Lift (PR-AUC ÷ prevalence) | Recall | Precision | "
+          "FPR |", "|---|---|---|---|---|---|---|---|---|---|"]
+    order = [f"{lead['name']}:{lz}"] + [g["name"] for g in groups]
+    for key in sorted(runs, key=lambda k: (k.startswith("above"), k)):          # crossing first
+        e = runs[key]
+        variant, h = key.rsplit("_h", 1)
+        for name in order:
+            x = e["by_zone_group"][name][e["chosen"]]
+            label = name.replace(":", " — ") if ":" in name else name
+            if x["n"] == 0:
+                continue
+            lift = "undefined (one class)" if x["pr_auc"] is None else f"{x['pr_auc'] / x['prevalence']:.2f}×"
+            L.append(f"| {variant} | {h} | {label} | {x['n']:,} | {_f(x['prevalence'], '.1%')} | "
+                     f"**{_f(x['pr_auc'])}** | {lift} | {_f(x['recall'])} | {_f(x['precision'])} | {_f(x['fpr'])} |")
+    L += ["", "The pooled tables below average over these groups. They are kept for completeness, but the group "
+          "table above is the honest summary.", ""]
+    return L
+
+
 def schedule_breakdown(predictions: pd.DataFrame, features: pd.DataFrame,
                        thresholds: dict[str, dict[str, float]]) -> dict[str, Any]:
     """Test metrics on "steady" rows (no break or shift boundary in (t, t+h]) and on rows
@@ -446,7 +538,8 @@ def write_report(results: dict[str, Any], path: Path, discussion_path: Path | No
             pz = e["prevalence_by_zone"][split]
             L.append(f"| {variant} | {h} | {split} | {e['n'][split]:,} | {_f(e['prevalence'][split], '.1%')} | "
                      + " | ".join(_f(pz.get(f"Z{i}"), ".1%") for i in range(1, 8)) + " |")
-    L += ["", "## 2. Split, tuning and operating threshold", "",
+    L += [""] + zone_group_lines(results)
+    L += ["", "## 3. Split, tuning and operating threshold", "",
           f"Chronological, never shuffled, identical to the forecasting work — {results['split_rule']}. Rows "
           "whose t+h crosses the end of their split are purged.", ""]
     L += [f"- {s}" for s in results["splits"]]
@@ -470,7 +563,7 @@ def write_report(results: dict[str, Any], path: Path, discussion_path: Path | No
           "constantly. This is a stated policy choice, not a tuned value. The persistence classifier has no "
           "score to threshold (it is yes/no). The test-day FPR can differ from the ceiling because the "
           "threshold is fixed before the test day is seen.", "",
-          "## 3. Test-day results (all zones)", "",
+          "## 4. Test-day results (all zones pooled)", "",
           "PR-AUC leads. Gain = model minus persistence on the same rows. A model that does not beat "
           "persistence has no result on that variant.", "",
           "| Variant | h | Prevalence | Model | **PR-AUC** | ROC-AUC | F1 | ΔF1 vs persistence | Precision | "
@@ -555,6 +648,9 @@ def main(argv: list[str] | None = None) -> int:
                       for m in MODELS} for k, e in results["runs"].items()}
     for key, part in schedule_breakdown(predictions, pd.read_parquet(args.features), thresholds).items():
         results["runs"][key]["by_schedule"] = part
+    results["zone_groups"] = c["zone_groups"]
+    for key, part in zone_group_breakdown(predictions, thresholds, c["zone_groups"]).items():
+        results["runs"][key]["by_zone_group"] = part
     args.metrics.write_text(json.dumps(results, indent=2), encoding="utf-8")
     write_figures(predictions, results, args.figures)
     write_report(results, args.report, args.discussion)

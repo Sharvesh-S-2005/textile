@@ -508,6 +508,16 @@ ml:
     # stops the classifier from simply alarming all the time. A stated choice, not a
     # tuned value.
     max_false_positive_rate: 0.10
+    # Reporting groups (Day 7): results are shown per group, never only averaged.
+    # Z1 is not in the Day 7 brief's table; its `crossing` label is 82-85% positive
+    # and the classifier predicts "yes" there almost always, so it sits with the loud zones.
+    zone_groups:
+      - {name: borderline, zones: [Z2, Z3, Z6], lead_zone: Z2,
+         character: "hover near 90 dBA; crossings driven by small fluctuations, not the schedule — the case that matters"}
+      - {name: always_loud, zones: [Z1, Z4, Z5],
+         character: "above 90 dBA whenever machines run; `crossing` is ~82-100% positive (restarts after breaks), so prediction is trivial and the metric is uninformative"}
+      - {name: excluded, zones: [Z7],
+         character: "office; never reaches 90 dBA, so no positive class"}
     # Hyperparameter grids, searched on the validation day (selection metric: PR-AUC).
     grids:
       logistic_regression: {C: [0.01, 0.1, 1.0, 10.0], class_weight: [null, balanced]}

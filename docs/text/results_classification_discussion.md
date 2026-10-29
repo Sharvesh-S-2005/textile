@@ -13,29 +13,34 @@ change: there persistence collapses to PR-AUC 0.38–0.58, while the models stay
 already strong (PR-AUC 0.81–0.82), and the model still improves on it (0.97). Logistic
 regression, the linear baseline, is clearly behind the tree models (PR-AUC 0.89–0.90).
 
-**`crossing`: the honest, harder task.** Persistence cannot predict a crossing at all
-(recall 0, PR-AUC = prevalence, 0.16), because every row in this population is below
-90 dBA now. XGBoost reaches PR-AUC 0.83–0.84, recall 0.78–0.81 at a test-day FPR of
-0.09–0.11, with precision 0.59–0.61: roughly two correct warnings for every false
-one. Two qualifications decide how far this should be trusted:
+**`crossing`: the pooled number is not the result; the zone groups are (Section 2).**
+Persistence cannot predict a crossing at all (recall 0, PR-AUC = prevalence, 0.16),
+because every row in this population is below 90 dBA now. Pooled over all zones,
+XGBoost reaches PR-AUC 0.83–0.84. That figure is mostly zone identity:
 
-1. **Much of it is the timetable again.** In Z4 and Z5 the only minutes below 90 dBA
-   are breaks and shift changeovers, and the machines always restart, so the
-   crossing prevalence there is 99–100%. On rows whose horizon spans a scheduled
-   transition the model reaches PR-AUC 0.87–0.93. On **steady** rows (no break or
-   shift boundary in the horizon), the PR-AUC is **0.69 at 30 min and 0.77 at 60 min**
-   (prevalence 12–14%). Those steady-row figures are the best guide to what will
-   survive on a real mill, where breaks drift.
-2. **Where the level hovers near the criterion, there is almost no skill.** Z2
-   (carding) sits around 90 dBA and crosses it at random. There XGBoost's PR-AUC is
-   0.20–0.23 against a prevalence of 0.18–0.19 (per-zone appendix). That is barely
-   above chance. A crossing that is a random fluctuation is not predictable from
-   these features, and the report says so rather than averaging it away.
+1. **Always-loud zones (Z1, Z4, Z5): trivial and useless.** The only quiet minutes
+   there are breaks and changeovers, and the machines always restart, so 91–93% of
+   them are followed by a crossing. Two-thirds of the pooled positives are these
+   restarts. Predicting them is easy, and warning about them adds nothing.
+2. **Office (Z7): certain negatives.** It contributes a quarter of the rows and never
+   crosses.
+3. **Borderline zones (Z2, Z3, Z6): the case that matters, and the result is weak.**
+   PR-AUC is 0.18 against a base rate of 0.08, about twice chance, with precision about
+   0.2. **In Z2 (carding) it barely beats chance**: PR-AUC 0.22 against 0.18, and the
+   pooled operating threshold raises false alarms on 44–53% of Z2's quiet minutes. Z2
+   sits at the criterion, and its crossings are fluctuations, not schedule events, so
+   these features cannot predict them.
+
+*Correction (Day 7).* An earlier version of this discussion called the steady-row PR-AUC
+(0.69 / 0.77) "the best guide to what will survive". That figure still includes the
+office's certain negatives and is superseded by the borderline-group figures above.
 
 **Operating threshold.** The recall-subject-to-FPR rule (ceiling 10%, fixed before the
-test day) held on the test day: FPR was 0.09–0.11 for every model it was applied to.
-The slight overshoots (0.106–0.122) come from applying a validation-day threshold to a
-different day, which is expected.
+test day) held on the test day *pooled*: FPR was 0.09–0.12 for every model it was
+applied to. Per zone it did not: one threshold for all zones lets Z2 run at FPR
+0.44–0.53 while the office sits at 0. Zone-specific thresholds, chosen on validation,
+are the obvious next step; they were not tried, to avoid any tuning after the test day
+had been seen.
 
 **Non-circularity holds, and the leakage tests enforce it.** The label is looked up at
 (zone, t + h) and checked against the forecasting target column at runtime; a

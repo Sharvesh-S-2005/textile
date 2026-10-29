@@ -412,9 +412,16 @@ def write_summary_md(path: Path, nums: dict[str, Any]) -> None:
         for key in ("above_h30", "crossing_h30", "crossing_h60"):
             e = c[key]
             x, pp = e["test"][e["chosen"]], e["test"]["persistence"]
-            L.append(f"| Classification | {key}: prevalence; PR-AUC {e['chosen']} vs persistence; F1 | "
-                     f"{100 * x['prevalence']:.1f}%; **{x['pr_auc']:.3f}** vs {pp['pr_auc']:.3f}; {x['f1']:.3f} | "
+            pooled = " (pooled over zones; see the zone-group rows)" if key.startswith("crossing") else ""
+            L.append(f"| Classification | {key}{pooled}: prevalence; PR-AUC {e['chosen']} vs persistence; F1 | "
+                     f"{100 * x['prevalence']:.1f}%; {x['pr_auc']:.3f} vs {pp['pr_auc']:.3f}; {x['f1']:.3f} | "
                      "classification_metrics.json |")
+        for row in report_ml.zone_group_rows(ml):
+            if row["variant"] != "crossing" or row["pr_auc"] is None:
+                continue
+            L.append(f"| Classification by zone group | crossing_h{row['h']}, {row['group']} ({row['zones']}): "
+                     f"prevalence; PR-AUC; lift; FPR | {100 * row['prevalence']:.1f}%; **{row['pr_auc']:.3f}**; "
+                     f"{row['lift']:.2f}×; {row['fpr']:.3f} | classification_metrics.json |")
         a = ml["ablation"]["forecasting"]
         for key in ("noise_dba_h30", "noise_dba_h60"):
             d = a[key]["differences"]["model_3_vs_model_1"]
@@ -422,6 +429,11 @@ def write_summary_md(path: Path, nums: dict[str, Any]) -> None:
             L.append(f"| Ablation | {key}: skill Model 3 − Model 1 [95% CI]; Model 2 − Model 1 | "
                      f"**{d['point']:+.3f}** [{d['lo']:+.3f}, {d['hi']:+.3f}]; {d2['point']:+.3f} "
                      f"[{d2['lo']:+.3f}, {d2['hi']:+.3f}] | ablation_metrics.json |")
+        for key, e in ml["ablation"].get("forecasting_nl", {}).items():
+            d = e["differences"]["model_3_nl_vs_model_1_nl"]
+            L.append(f"| Ablation, no target lags | {key}: skill Model 1-NL; Model 3-NL − Model 1-NL [95% CI] | "
+                     f"{e['test']['model_1_nl']['skill_vs_persistence']:+.3f}; **{d['point']:+.3f}** "
+                     f"[{d['lo']:+.3f}, {d['hi']:+.3f}] | ablation_metrics.json |")
         an = ml["anomaly"]
         bad = [k for k, v in an["machines"].items() if v["configured_degrading"]][0]
         L.append(f"| Anomaly | {bad} detection day EWMA / isolation forest; healthy per-bin FPR | "
@@ -485,20 +497,33 @@ def write_numbers_sheet(path: Path, nums: dict[str, Any]) -> None:
     if ml:
         c = ml["classification"]["runs"]
         ab, cr30, cr60 = (c[k]["test"][c[k]["chosen"]] for k in ("above_h30", "crossing_h30", "crossing_h60"))
-        L.append(f"| Exceedance classification (90 dBA) | `above`: prevalence {100 * ab['prevalence']:.0f}%, PR-AUC "
-                 f"**{ab['pr_auc']:.2f}** vs persistence {c['above_h30']['test']['persistence']['pr_auc']:.2f}. "
-                 f"`crossing`: prevalence {100 * cr30['prevalence']:.0f}%, PR-AUC **{cr30['pr_auc']:.2f} / "
-                 f"{cr60['pr_auc']:.2f}** (t+30 / t+60), persistence cannot predict it |")
-        st30 = c["crossing_h30"]["by_schedule"]["steady"][c["crossing_h30"]["chosen"]]["pr_auc"]
-        st60 = c["crossing_h60"]["by_schedule"]["steady"][c["crossing_h60"]["chosen"]]["pr_auc"]
-        L.append(f"| Crossing, break-free windows | PR-AUC **{st30:.2f} / {st60:.2f}** — the honest figure; Z2 "
-                 "(near 90 dBA) barely beats chance |")
+        groups = ml["classification"].get("zone_groups")
+        if groups and "by_zone_group" in c["crossing_h30"]:
+            lead = next(g for g in groups if g.get("lead_zone"))
+            zk = f"{lead['name']}:{lead['lead_zone']}"
+            z30, z60 = (c[k]["by_zone_group"][zk][c[k]["chosen"]] for k in ("crossing_h30", "crossing_h60"))
+            g30 = c["crossing_h30"]["by_zone_group"][lead["name"]][c["crossing_h30"]["chosen"]]
+            L.append(f"| Exceedance warning where it matters ({lead['lead_zone']}, near 90 dBA) | **Barely beats chance**: "
+                     f"`crossing` PR-AUC **{z30['pr_auc']:.2f} / {z60['pr_auc']:.2f}** vs base rate "
+                     f"{z30['prevalence']:.2f}; false alarms on {z30['fpr']:.0%} / {z60['fpr']:.0%} of quiet minutes. "
+                     f"Borderline group ({', '.join(lead['zones'])}): {g30['pr_auc']:.2f} vs {g30['prevalence']:.2f} |")
+        L.append(f"| Exceedance classification, pooled | `above`: prevalence {100 * ab['prevalence']:.0f}%, PR-AUC "
+                 f"{ab['pr_auc']:.2f} vs persistence {c['above_h30']['test']['persistence']['pr_auc']:.2f}. "
+                 f"`crossing` {cr30['pr_auc']:.2f} / {cr60['pr_auc']:.2f} — driven by always-loud zones (trivial "
+                 "restarts) and the office; not the result |")
         a = ml["ablation"]["forecasting"]
         d30, d60 = (a[k]["differences"]["model_3_vs_model_1"] for k in ("noise_dba_h30", "noise_dba_h60"))
-        L.append(f"| Objective 6 ablation | Machine + history data (Model 3) improve noise skill by **{d30['point']:+.3f} / "
-                 f"{d60['point']:+.3f}** (95% CIs exclude 0); worker data (Model 2) adds at most "
-                 f"{a['noise_dba_h30']['differences']['model_2_vs_model_1']['point']:+.3f} (under 0.1 dB); "
-                 "no practical gain for dust, heat or classification |")
+        nl = ml["ablation"].get("forecasting_nl")
+        if nl:
+            n30, n60 = (nl[k]["differences"]["model_3_nl_vs_model_1_nl"] for k in ("noise_dba_h30", "noise_dba_h60"))
+            c30, c60 = (nl[k]["test"]["model_1_nl"]["skill_vs_persistence"] for k in ("noise_dba_h30", "noise_dba_h60"))
+            L.append(f"| Objective 6 ablation | **Negative answer.** Machine + worker data add {d30['point']:+.3f} / "
+                     f"{d60['point']:+.3f} noise skill with target lags, and only **{n30['point']:+.3f} / "
+                     f"{n60['point']:+.3f}** without them (CIs exclude 0; about 0.1 dB). Redundant with the timetable: "
+                     f"a model with **no noise input** reaches **{c30:+.2f} / {c60:+.2f}** → sensor-failure resilience |")
+        else:
+            L.append(f"| Objective 6 ablation | Machine + history data (Model 3) improve noise skill by "
+                     f"**{d30['point']:+.3f} / {d60['point']:+.3f}** (95% CIs exclude 0) |")
         an = ml["anomaly"]
         bad = [k for k, v in an["machines"].items() if v["configured_degrading"]][0]
         L.append(f"| Machine condition | {bad} flagged on day **{an['machines'][bad]['ewma']['alarm_day']:.2f}** (EWMA) / "
@@ -575,6 +600,7 @@ def main(argv: list[str] | None = None) -> int:
     slim.pop("ml", None)
     if "ml" in nums:
         slim["ml"] = {"comparison": report_ml.comparison_rows(nums["ml"]),
+                      "classification_groups": report_ml.zone_group_rows(nums["ml"]),
                       "deep_learning": report_ml.deep_learning_text(nums["ml"].get("deep"))}
     slim["exposure"] = {k: exposure[k] for k in ("dates", "valid", "over_100_niosh", "over_100_india", "coverage_mean",
                                                  "unaccounted_mean", "risk")}

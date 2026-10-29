@@ -86,6 +86,9 @@ def test_models_page_shows_the_comparison_table_and_caveats(dashboard_db: Path,
     assert "by construction" in text                               # simulator-coupling caveat
     assert "risk classifier is deferred" in text
     assert at.dataframe and len(at.dataframe[0].value) > 0
+    assert "barely beats chance" in text                           # Day 7: lead with the zone that matters
+    assert len(at.dataframe) >= 2                                  # comparison table + zone-group table
+    assert "50× lower" in text                                     # EWMA chosen on evidence
 
 
 def test_drilldown_defaults_to_the_highest_index_worker(dashboard_db: Path, monkeypatch: pytest.MonkeyPatch) -> None:

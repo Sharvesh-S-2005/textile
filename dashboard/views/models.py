@@ -59,6 +59,23 @@ st.dataframe(table[table["Task"].isin(chosen)], hide_index=True, use_container_w
 st.markdown("## Exceedance classification (noise ≥ 90 dBA at t+h)")
 st.caption("Label = the measured level at t+h: a future measurement, not a rule on the inputs, so not circular. "
            "Threshold = highest validation recall with false-positive rate ≤ 10% (a stated policy).")
+groups = ml.get("classification_groups") or []
+lead = next((r for r in groups if r["variant"] == "crossing" and r["h"] == 30 and "," not in r["zones"]
+             and r["pr_auc"] is not None), None)
+if lead:
+    st.warning(f"**Where a warning matters most, the classifier barely beats chance.** In {lead['zones']} "
+               f"(hovering at 90 dBA), `crossing` PR-AUC is {lead['pr_auc']:.2f} against a base rate of "
+               f"{lead['prevalence']:.2f}, with false alarms on {lead['fpr']:.0%} of quiet minutes. Its crossings are "
+               "small fluctuations, not schedule events. In the always-loud zones the label is trivially predictable "
+               "(machines restart after every break), so the pooled PR-AUC overstates the useful skill.")
+    table_g = pd.DataFrame([{
+        "Variant": r["variant"], "h (min)": r["h"], "Group": r["group"], "Zones": r["zones"], "n": r["n"],
+        "Prevalence": None if r["prevalence"] is None else round(r["prevalence"], 3),
+        "PR-AUC": None if r["pr_auc"] is None else round(r["pr_auc"], 3),
+        "Lift (PR-AUC ÷ prevalence)": None if r["lift"] is None else round(r["lift"], 2),
+        "Recall": None if r["recall"] is None else round(r["recall"], 3),
+        "FPR": None if r["fpr"] is None else round(r["fpr"], 3), "Character": r["character"]} for r in groups])
+    st.dataframe(table_g, hide_index=True, use_container_width=True)
 c1, c2 = st.columns(2)
 figure(c1, "classification_pr_roc_above_h30.png", "`above`, t+30: PR and ROC curves")
 figure(c2, "classification_pr_roc_crossing_h30.png", "`crossing`, t+30: PR and ROC curves")
@@ -69,13 +86,21 @@ st.markdown("## Objective 6: does worker and machine data help? (Model 1 / 2 / 3
 st.caption("Reframed onto hazard forecasting and exceedance classification, because no honest risk label exists "
            "yet. Same model class, split and seed; each feature set tuned separately; 95% block-bootstrap intervals "
            "on paired differences.")
-figure(st, "ablation_skill.png", "Forecast skill and classification PR-AUC by feature set")
-st.markdown("**Finding:** machine and zone-history data give a small, statistically distinguishable gain in noise "
-            "forecasting; worker data adds nothing of practical size; no set helps dust, heat or classification.")
+figure(st, "ablation_redundancy.png", "Skill with and without target history (and without the timetable)")
+st.markdown("**Finding (negative on this dataset):** machine and worker data add +0.017 / +0.028 noise skill with "
+            "target lags and only about +0.014 without them; nothing once the timetable is also removed. The "
+            "information is redundant with the timetable: a model with **no noise input** already reaches skill "
+            "+0.76 / +0.77. **Implication:** if a noise or PM sensor fails, zone forecasting continues from context "
+            "and the timetable (sensor-failure resilience).")
+figure(st, "ablation_skill.png", "Day 6 ablation: forecast skill and classification PR-AUC by feature set")
 st.warning(COUPLING)
 
 st.markdown("## Machine condition monitoring")
 figure(st, "anomaly_m5_vibration.png", "M5 vibration over the week, healthy-machine band, detection points")
+st.markdown("**The simpler method was chosen on evidence.** Both detectors flag the degrading machine within a day "
+            "of each other (day 2.08 EWMA, 2.12 isolation forest), and neither alarms on a healthy machine, but the "
+            "EWMA control chart's false-positive rate is more than 50× lower (0.02% vs 1.03%), and it is the method a "
+            "maintenance engineer already recognises.")
 st.warning(COUPLING)
 
 st.markdown("## Deep learning")
