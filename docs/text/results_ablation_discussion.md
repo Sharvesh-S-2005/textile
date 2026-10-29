@@ -1,12 +1,38 @@
-## Conclusion: the answer to Objective 6
+## Conclusion: the answer to Objective 6 (revised on Day 7)
 
-**On this dataset, machine and zone-history data (Model 3) give a small but
-statistically distinguishable improvement in *noise* forecasting over environmental
-data alone. Worker-specific data (Model 2) adds nothing of practical size to any task
-(at most +0.007 skill, under 0.1 dB of MAE), and neither set improves dust or heat
-forecasting or exceedance classification in any practical sense.**
+**With dense target history available, machine and worker features add little: +0.017
+to +0.028 noise skill. The Day 7 redundancy analysis tested whether that was because
+their information is redundant with the target's own autocorrelation, and the answer
+is: only partly. With every target-derived column removed, the same features still
+add only +0.014 noise skill at both horizons (95% CIs exclude 0), and nothing
+distinguishable for dust. With the timetable also removed, they add nothing
+distinguishable at all (+0.001 to +0.008).**
 
-### What the numbers show
+**The information is redundant with the timetable.** In this simulator, machines run
+exactly when the shift schedule says. A context-only model (temperature, RH, CO2, time
+of day, shift, break and zone, with **no noise input at all**) reaches noise skill
+**+0.76 / +0.77**. That is as high as the Day 6 model with dense noise history
+(+0.74 / +0.76; the two were not compared with a paired interval). Machine state at t
+describes what is happening *now*. Over a 30–60-minute horizon, what changes zone noise
+is the next break or shift change, and the timetable already knows that.
+
+**So the objective's question has a negative answer on this dataset:** worker and
+machine data do not improve 30–60-minute hazard forecasting beyond what the
+environmental context and the timetable already provide. The improvement that exists
+is statistically detectable but small: about 0.1 dB of MAE.
+
+**The practical implication is sensor-failure resilience, carried mainly by the
+timetable.** When a noise or PM sensor clogs, drifts or fails (a documented failure
+mode for optical sensors in lint-heavy air), a model with no hazard-sensor input
+continues to forecast zone hazard levels: noise skill +0.76 / +0.77 and dust
++0.38 / +0.42, close to the full models. Machine state adds a small, significant
++0.014 on top for noise. In this simulator, the timetable, not machine state, carries
+the fallback signal. On a real mill, machines also stop for unscheduled reasons, and
+then machine state would carry information the timetable cannot. That is a hypothesis
+for the hardware phase, not a result here. The direct test, estimating *current* zone
+noise from machine state alone (a nowcast), was not run.
+
+### What the Day 6 numbers show
 
 - **Noise forecasting: Model 3 > Model 1, significant at both horizons.** Skill rises
   +0.017 at 30 min (95% CI +0.011 to +0.025) and +0.028 at 60 min (+0.020 to +0.037).

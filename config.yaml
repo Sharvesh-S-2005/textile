@@ -525,6 +525,7 @@ ml:
            subsample: [0.8], colsample_bytree: [0.8]}
     early_stopping_rounds: 30
     forecast_targets: [noise_dba, pm25_ugm3, wbgt_c]
+    nl_targets: [noise_dba, pm25_ugm3]   # Day 7 no-lag redundancy analysis (heat skipped)
     classification_variants: [above, crossing]
     # Zone-history features added in Model 3 (trailing windows ending at t).
     history_long_window_min: 480     # 8 h: zone L_Aeq,8h-style noise and mean dust

@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ml.ablation import (ENVIRONMENTAL, FEATURE_SETS, HISTORY, MACHINE_HISTORY, WORKER, add_history_features,
+from ml.ablation import (ENVIRONMENTAL, FEATURE_SETS, HISTORY, MACHINE_HISTORY, MACHINE_WORKER_NL, NL_FEATURE_SETS,
+                         NS_FEATURE_SETS, SCHEDULE, WORKER, add_history_features, check_nl_sets, target_derived,
                          block_groups, bootstrap_interval, check_feature_sets, tune_per_set, verdict)
 from ml.features import feature_columns
 from ml.forecast import MIN_MS
@@ -31,6 +32,31 @@ def test_model_1_holds_no_worker_or_machine_column() -> None:
 
 def test_model_3_uses_every_feature_table_column() -> None:
     assert set(FEATURE_SETS["model_3"]) == set(feature_columns()) | set(HISTORY)
+
+
+def test_no_lag_sets_contain_no_target_derived_column() -> None:
+    """No value, lag, rolling statistic or history of noise, PM2.5 or WBGT in any NL/NS set."""
+    for sets in (NL_FEATURE_SETS, NS_FEATURE_SETS):
+        for name, cols in sets.items():
+            assert not [c for c in cols if target_derived(c)], name
+            assert not set(cols) & set(HISTORY), name
+    # the guard itself recognises every target-derived column of the feature table
+    derived = [c for c in feature_columns() if c.startswith(("noise_dba", "pm25_ugm3", "wbgt_c"))]
+    assert len(derived) == 45 and all(target_derived(c) for c in derived)
+
+
+def test_no_lag_sets_are_strictly_nested_and_differ_only_by_machine_and_worker() -> None:
+    for sets, lo, hi in ((NL_FEATURE_SETS, "model_1_nl", "model_3_nl"), (NS_FEATURE_SETS, "model_1_ns", "model_3_ns")):
+        assert set(sets[lo]) < set(sets[hi])
+        assert set(sets[hi]) - set(sets[lo]) == set(MACHINE_WORKER_NL)
+        check_nl_sets(sets)
+    assert set(NS_FEATURE_SETS["model_1_ns"]) == set(NL_FEATURE_SETS["model_1_nl"]) - set(SCHEDULE)
+    assert "zone_code" in NL_FEATURE_SETS["model_1_nl"] and "zone_code" in NS_FEATURE_SETS["model_1_ns"]
+
+
+def test_nl_check_rejects_a_lagged_column() -> None:
+    with pytest.raises(ValueError):
+        check_nl_sets({"model_1_nl": ["temp_c"], "model_3_nl": ["temp_c", "noise_dba_lag5"]})
 
 
 def test_check_rejects_a_set_that_is_not_nested() -> None:

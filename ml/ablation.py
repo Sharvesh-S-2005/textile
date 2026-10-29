@@ -78,6 +78,55 @@ SET_LABELS = {"model_1": "Model 1 (environmental)", "model_2": "Model 2 (+ worke
               "model_3": "Model 3 (+ machine & history)"}
 PAIRS = (("model_2", "model_1"), ("model_3", "model_1"), ("model_3", "model_2"))
 
+# Redundancy analysis (Day 7): the same question with NO history of any hazard series.
+# Model 1 above already holds noise lags at t ... t-30; when machines stop, recent noise
+# is already low, so machine state is largely redundant with it. Without target
+# history, what machine and worker data carry on their own becomes measurable.
+# zone_code stays in both sets: every model pools all zones, and without it the
+# machine counts (0 in the office, 2 in weaving) would act as a zone label and
+# inflate the gain.
+TARGET_SERIES: tuple[str, ...] = ("noise_dba", "pm25_ugm3", "wbgt_c")
+CONTEXT_NL: list[str] = ["temp_c", "temp_c_rmean15", "rh_pct", "rh_pct_rmean15", "co2_ppm", "co2_ppm_rmean15",
+                         "minute_sin", "minute_cos", "shift_code", "is_break", "zone_code"]
+MACHINE_WORKER_NL: list[str] = ["machines_running_count", "mean_current_a", "max_vib_rms_g", "workers_present_count"]
+NL_FEATURE_SETS: dict[str, list[str]] = {
+    "model_1_nl": CONTEXT_NL,
+    "model_3_nl": CONTEXT_NL + MACHINE_WORKER_NL,
+}
+NL_PAIRS = (("model_3_nl", "model_1_nl"),)
+# Supplementary pair (Day 7): also without the timetable (shift, break, time of day),
+# to measure how much of the machine signal is redundant with the schedule itself.
+SCHEDULE: list[str] = ["minute_sin", "minute_cos", "shift_code", "is_break"]
+CONTEXT_NS: list[str] = [col for col in CONTEXT_NL if col not in SCHEDULE]
+NS_FEATURE_SETS: dict[str, list[str]] = {
+    "model_1_ns": CONTEXT_NS,
+    "model_3_ns": CONTEXT_NS + MACHINE_WORKER_NL,
+}
+NS_PAIRS = (("model_3_ns", "model_1_ns"),)
+
+
+def target_derived(column: str) -> bool:
+    """True if a column is built from a hazard series (its value, lags, rolling stats or history)."""
+    return any(column.startswith(t) for t in TARGET_SERIES)
+
+
+def check_nl_sets(sets: dict[str, list[str]] = NL_FEATURE_SETS) -> None:
+    """Raise unless the no-lag sets are strictly nested, duplicate-free, available in the
+    feature table, and free of any column derived from a hazard series."""
+    names = list(sets)
+    for a, b in zip(names, names[1:]):
+        if not set(sets[a]) < set(sets[b]):
+            raise ValueError(f"{a} is not a strict subset of {b}")
+    available = set(feature_columns())
+    for name, cols in sets.items():
+        if len(cols) != len(set(cols)):
+            raise ValueError(f"{name} has duplicate columns")
+        if set(cols) - available:
+            raise ValueError(f"{name} uses columns not in the feature table: {sorted(set(cols) - available)}")
+        derived = [col for col in cols if target_derived(col)]
+        if derived:
+            raise ValueError(f"{name} contains target-derived columns: {derived}")
+
 
 def check_feature_sets(sets: dict[str, list[str]] = FEATURE_SETS) -> None:
     """Raise unless the sets are strictly nested and cover exactly the available columns.
@@ -233,18 +282,24 @@ def _f1(y: np.ndarray, pred: np.ndarray) -> float:
 
 
 def forecasting_ablation(df: pd.DataFrame, splits: list[Any], c: dict[str, Any], horizons: list[int],
-                         seed: int) -> dict[str, Any]:
-    """Skill, MAE, RMSE per feature set, with bootstrap intervals on skill differences."""
+                         seed: int, sets: dict[str, list[str]] | None = None,
+                         pairs: tuple[tuple[str, str], ...] = PAIRS,
+                         targets: list[str] | None = None) -> dict[str, Any]:
+    """Skill, MAE, RMSE per feature set, with bootstrap intervals on skill differences.
+
+    Defaults are the Day 6 nested sets; the no-lag analysis passes NL_FEATURE_SETS.
+    """
+    sets = FEATURE_SETS if sets is None else sets
     out = {}
     bs = (int(c["bootstrap_resamples"]), seed, float(c["bootstrap_ci"]))
-    for target in c["forecast_targets"]:
+    for target in (c["forecast_targets"] if targets is None else targets):
         for h in horizons:
             key = f"{target}_h{h}"
             y_col = f"target_{target}_h{h}"
             m = {s.name: split_mask(df["t_ms"], s, h) & df[y_col].notna() for s in splits}
             train, val = df[m["train"]], df[m["validation"]]
             test = df[m["test"] & df[target].notna()]
-            fitted = tune_per_set("regression", FEATURE_SETS, c["grid"], train, train[y_col].to_numpy(), val,
+            fitted = tune_per_set("regression", sets, c["grid"], train, train[y_col].to_numpy(), val,
                                   val[y_col].to_numpy(), seed, int(c["early_stopping_rounds"]))
             y, persist = test[y_col].to_numpy(), test[target].to_numpy()
             mae_p = float(np.mean(np.abs(y - persist)))
@@ -260,7 +315,7 @@ def forecasting_ablation(df: pd.DataFrame, splits: list[Any], c: dict[str, Any],
                                    for n, p in preds.items()},
                 "differences": {f"{a}_vs_{b}": bootstrap_interval(groups, _skill_diff_stat(y, preds[a], preds[b],
                                                                                            persist), *bs)
-                                for a, b in PAIRS},
+                                for a, b in pairs},
                 "by_zone": {}}
             for z in sorted(np.unique(zones)):
                 zi = zones == z
@@ -272,7 +327,7 @@ def forecasting_ablation(df: pd.DataFrame, splits: list[Any], c: dict[str, Any],
                     "n": int(zi.sum()),
                     "skill": {n: float(_skill_stat(zy, p[zi], zp)(np.arange(zi.sum()))) for n, p in preds.items()},
                     "differences": {f"{a}_vs_{b}": bootstrap_interval(
-                        zg, _skill_diff_stat(zy, preds[a][zi], preds[b][zi], zp), *bs) for a, b in PAIRS}}
+                        zg, _skill_diff_stat(zy, preds[a][zi], preds[b][zi], zp), *bs) for a, b in pairs}}
             out[key] = entry
             log.info("forecast %s skill %s", key, {n: round(v["skill_vs_persistence"], 3)
                                                    for n, v in entry["test"].items()})
@@ -361,7 +416,71 @@ def run(features_path: Path, metrics_path: Path) -> dict[str, Any]:
     return results
 
 
+def run_no_lag(features_path: Path, metrics_path: Path) -> dict[str, Any]:
+    """Day 7 redundancy analysis: forecast with the no-lag sets and MERGE into the saved
+    Day 6 metrics (which are not recomputed). Same split, seed, grid and bootstrap."""
+    check_nl_sets()
+    ml = config.get_ml_config()
+    c = ml["ablation"]
+    seed = int(ml["random_seed"])
+    results = json.loads(metrics_path.read_text(encoding="utf-8"))
+    df = pd.read_parquet(features_path)
+    splits, rule = chronological_splits(df["t_ms"], ml["split_days"], ml["split_fallback_fractions"])
+    if rule != results["split_rule"]:
+        raise ValueError("the split differs from the saved Day 6 ablation; rerun the full ablation")
+    results["nl_feature_sets"] = NL_FEATURE_SETS
+    results["forecasting_nl"] = forecasting_ablation(df, splits, c, ml["horizons_min"], seed, sets=NL_FEATURE_SETS,
+                                                     pairs=NL_PAIRS, targets=list(c["nl_targets"]))
+    check_nl_sets(NS_FEATURE_SETS)
+    results["ns_feature_sets"] = NS_FEATURE_SETS
+    results["forecasting_ns"] = forecasting_ablation(df, splits, c, ml["horizons_min"], seed, sets=NS_FEATURE_SETS,
+                                                     pairs=NS_PAIRS, targets=list(c["nl_targets"]))
+    for block in ("forecasting_nl", "forecasting_ns"):
+        for key, e in results[block].items():
+            if key in results["forecasting"] and e["n_test"] != results["forecasting"][key]["n_test"]:
+                raise ValueError(f"{key}: {block} test rows differ from the Day 6 ablation")
+    metrics_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    return results
+
+
 # ---------------------------------------------------------------- figure and report
+
+
+def write_redundancy_figure(results: dict[str, Any], path: Path) -> Path:
+    """Grouped bars: skill of Model 1, Model 3, Model 1-NL, Model 3-NL per target/horizon, 95% bars."""
+    import matplotlib.pyplot as plt
+
+    import figstyle
+
+    figstyle.apply()
+    keys = list(results["forecasting_nl"])
+    bars = [("forecasting", "model_1", "Model 1 (with target lags)", "#BDBDBD", ""),
+            ("forecasting", "model_3", "Model 3 (with target lags)", "#0072B2", ".."),
+            ("forecasting_nl", "model_1_nl", "Model 1-NL (context only)", "#F2F2F2", "//"),
+            ("forecasting_nl", "model_3_nl", "Model 3-NL (+ machine & worker)", "#E69F00", "xx")]
+    if "forecasting_ns" in results:
+        bars += [("forecasting_ns", "model_1_ns", "Model 1-NS (no lags, no timetable)", "#FFFFFF", "--"),
+                 ("forecasting_ns", "model_3_ns", "Model 3-NS (+ machine & worker)", "#D55E00", "oo")]
+    fig, ax = plt.subplots(figsize=(14, 6.5))
+    width = 0.8 / len(bars)
+    x = np.arange(len(keys))
+    for k, (block, s, label, colour, hatch) in enumerate(bars):
+        vals = [results[block][key]["test"][s]["skill_vs_persistence"] for key in keys]
+        lo = [results[block][key]["skill_interval"][s]["lo"] for key in keys]
+        hi = [results[block][key]["skill_interval"][s]["hi"] for key in keys]
+        ax.bar(x + (k - (len(bars) - 1) / 2) * width, vals, width, yerr=np.array([np.subtract(vals, lo), np.subtract(hi, vals)]),
+               capsize=3, color=colour, hatch=hatch, edgecolor="black", linewidth=0.6, label=label)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels([key.replace("_h", "\nt+").replace("_dba", "").replace("_ugm3", "") for key in keys])
+    ax.set(ylabel="Skill vs persistence (1 − MAE/MAE_pers.)",
+           title="Redundancy: what machine data adds with and without target history")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=10, frameon=False)
+    figstyle.simulated_badge(ax)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path)
+    plt.close(fig)
+    return path
 
 
 def write_figure(results: dict[str, Any], path: Path) -> Path:
@@ -519,10 +638,74 @@ def write_report(results: dict[str, Any], path: Path, discussion_path: Path | No
     L += ["", "✓ = interval excludes 0 in favour of the larger set; ✗ = excludes 0 against it; "
           "~ = not distinguishable.", "", "Figure: `docs/figures/ablation_skill.png` (forecast skill with 95% "
           "bootstrap bars, and classification PR-AUC, by feature set).", ""]
+    if "forecasting_nl" in results:
+        L += _no_lag_section(results)
     if discussion_path is not None and discussion_path.exists():
         L += [discussion_path.read_text(encoding="utf-8").strip(), ""]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(L), encoding="utf-8")
+
+
+def _no_lag_section(results: dict[str, Any]) -> list[str]:
+    """The Day 7 redundancy analysis: Model 1-NL vs Model 3-NL, beside Model 1 and Model 3."""
+    nl, fs = results["forecasting_nl"], results["nl_feature_sets"]
+    L = ["## Redundancy analysis: the same question without target history (Day 7)", "",
+         "Model 1 already contains the target's own lags (t … t−30) and rolling statistics. When machines stop, "
+         "recent noise is already low, so machine state is largely a function of what Model 1 holds; the Day 6 gain "
+         "measured **redundancy**, not informativeness. Here every column derived from a hazard series (noise, PM2.5, "
+         "WBGT: values, lags, rolling statistics, history) is removed, and the comparison is repeated. "
+         "`tests/test_ablation.py` asserts that the no-lag sets contain no such column.", "",
+         "| Set | n features | Columns |", "|---|---|---|",
+         f"| Model 1-NL | {len(fs['model_1_nl'])} | " + ", ".join(f"`{c}`" for c in fs["model_1_nl"]) + " |",
+         f"| Model 3-NL | {len(fs['model_3_nl'])} | Model 1-NL + "
+         + ", ".join(f"`{c}`" for c in fs["model_3_nl"] if c not in fs["model_1_nl"]) + " |", "",
+         "`zone_code` is in both: every model pools all zones, and without zone identity the machine counts (0 in "
+         "the office, 2 in weaving) would act as a zone label and inflate the gain. Same model class, split, seed and "
+         "grid; each set tuned separately on the validation day; same block bootstrap.", "",
+         "| Target | h | Set | Chosen params | **Skill** [95% CI] | MAE | RMSE |", "|---|---|---|---|---|---|---|"]
+    for key, e in nl.items():
+        t, h = key.rsplit("_h", 1)
+        rows = [(s, e, "") for s in fs]
+        if key in results["forecasting"]:
+            rows = [(s, results["forecasting"][key], " (Day 6)") for s in ("model_1", "model_3")] + rows
+        for s, src, tag in rows:
+            x, p, iv = src["test"][s], src["tuning"][s]["chosen"], src["skill_interval"][s]
+            L.append(f"| {t} | {h} | {s}{tag} | depth {p['max_depth']}, lr {p['learning_rate']}, "
+                     f"{p['best_iteration']} trees | **{x['skill_vs_persistence']:+.3f}** [{iv['lo']:+.3f}, "
+                     f"{iv['hi']:+.3f}] | {x['mae']:.2f} | {x['rmse']:.2f} |")
+    L += ["", "### Model 3-NL − Model 1-NL (95% block-bootstrap CI), beside the Day 6 gain", "",
+          "| Target | h | Gain without target lags | Gain with target lags (Model 3 − Model 1) |", "|---|---|---|---|"]
+    for key, e in nl.items():
+        t, h = key.rsplit("_h", 1)
+        d = e["differences"]["model_3_nl_vs_model_1_nl"]
+        d6 = results["forecasting"].get(key, {}).get("differences", {}).get("model_3_vs_model_1")
+        L.append(f"| {t} | {h} | **{_ci(d)}** — {verdict(d)} | "
+                 + ("—" if d6 is None else f"{_ci(d6)} — {verdict(d6)}") + " |")
+    if "forecasting_ns" in results:
+        ns = results["forecasting_ns"]
+        L += ["", "### Supplementary: also without the timetable", "",
+              "To measure how much of the machine signal is redundant with the schedule itself, the same comparison "
+              "is repeated with the schedule columns (`minute_sin`, `minute_cos`, `shift_code`, `is_break`) also "
+              "removed: Model 1-NS = temperature, RH, CO2 and their means, plus `zone_code`; Model 3-NS adds the same "
+              "machine and worker columns. Same tuning and bootstrap.", "",
+              "| Target | h | Skill 1-NS | Skill 3-NS | **Gain without lags or timetable** [95% CI] |",
+              "|---|---|---|---|---|"]
+        for key, e in ns.items():
+            t, h = key.rsplit("_h", 1)
+            d = e["differences"]["model_3_ns_vs_model_1_ns"]
+            L.append(f"| {t} | {h} | {e['test']['model_1_ns']['skill_vs_persistence']:+.3f} | "
+                     f"{e['test']['model_3_ns']['skill_vs_persistence']:+.3f} | **{_ci(d)}** — {verdict(d)} |")
+    L += ["", "### Per zone (gain without target lags)", "",
+          "| Target | h | Zone | n | Skill 1-NL | Skill 3-NL | 3-NL − 1-NL [CI] |", "|---|---|---|---|---|---|---|"]
+    for key, e in nl.items():
+        t, h = key.rsplit("_h", 1)
+        for z, zz in e["by_zone"].items():
+            d = zz["differences"]["model_3_nl_vs_model_1_nl"]
+            L.append(f"| {t} | {h} | {z} | {zz['n']:,} | {zz['skill']['model_1_nl']:+.3f} | "
+                     f"{zz['skill']['model_3_nl']:+.3f} | {_ci(d)} {_mark(d)} |")
+    L += ["", "Figure: `docs/figures/ablation_redundancy.png` (skill of Model 1, Model 3, Model 1-NL and Model 3-NL "
+          "with 95% bootstrap bars).", ""]
+    return L
 
 
 def _mark(iv: dict[str, Any]) -> str:
@@ -541,12 +724,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--report", type=Path, default=root / "docs" / "results_ablation.md")
     p.add_argument("--discussion", type=Path, default=root / "docs" / "text" / "results_ablation_discussion.md")
     p.add_argument("--report-only", action="store_true", help="skip training: rebuild figure and report")
+    p.add_argument("--nl-only", action="store_true",
+                   help="run only the no-lag redundancy analysis and merge it into the saved metrics")
     args = p.parse_args(argv)
     if args.report_only:
         results = json.loads(args.metrics.read_text(encoding="utf-8"))
+    elif args.nl_only:
+        results = run_no_lag(args.features, args.metrics)
     else:
         results = run(args.features, args.metrics)
     write_figure(results, args.figure)
+    if "forecasting_nl" in results:
+        write_redundancy_figure(results, args.figure.with_name("ablation_redundancy.png"))
     write_report(results, args.report, args.discussion)
     summary = {k: {s: round(v["test"][s]["skill_vs_persistence"], 3) for s in FEATURE_SETS}
                for k, v in results["forecasting"].items()}

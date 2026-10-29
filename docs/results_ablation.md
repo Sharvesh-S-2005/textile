@@ -174,15 +174,126 @@ A gain that exists in only one zone is visible here rather than hidden in the po
 
 Figure: `docs/figures/ablation_skill.png` (forecast skill with 95% bootstrap bars, and classification PR-AUC, by feature set).
 
-## Conclusion: the answer to Objective 6
+## Redundancy analysis: the same question without target history (Day 7)
 
-**On this dataset, machine and zone-history data (Model 3) give a small but
-statistically distinguishable improvement in *noise* forecasting over environmental
-data alone. Worker-specific data (Model 2) adds nothing of practical size to any task
-(at most +0.007 skill, under 0.1 dB of MAE), and neither set improves dust or heat
-forecasting or exceedance classification in any practical sense.**
+Model 1 already contains the target's own lags (t … t−30) and rolling statistics. When machines stop, recent noise is already low, so machine state is largely a function of what Model 1 holds; the Day 6 gain measured **redundancy**, not informativeness. Here every column derived from a hazard series (noise, PM2.5, WBGT: values, lags, rolling statistics, history) is removed, and the comparison is repeated. `tests/test_ablation.py` asserts that the no-lag sets contain no such column.
 
-### What the numbers show
+| Set | n features | Columns |
+|---|---|---|
+| Model 1-NL | 11 | `temp_c`, `temp_c_rmean15`, `rh_pct`, `rh_pct_rmean15`, `co2_ppm`, `co2_ppm_rmean15`, `minute_sin`, `minute_cos`, `shift_code`, `is_break`, `zone_code` |
+| Model 3-NL | 15 | Model 1-NL + `machines_running_count`, `mean_current_a`, `max_vib_rms_g`, `workers_present_count` |
+
+`zone_code` is in both: every model pools all zones, and without zone identity the machine counts (0 in the office, 2 in weaving) would act as a zone label and inflate the gain. Same model class, split, seed and grid; each set tuned separately on the validation day; same block bootstrap.
+
+| Target | h | Set | Chosen params | **Skill** [95% CI] | MAE | RMSE |
+|---|---|---|---|---|---|---|
+| noise_dba | 30 | model_1 (Day 6) | depth 6, lr 0.1, 335 trees | **+0.743** [+0.701, +0.776] | 2.07 | 3.18 |
+| noise_dba | 30 | model_3 (Day 6) | depth 6, lr 0.05, 379 trees | **+0.760** [+0.720, +0.791] | 1.94 | 2.97 |
+| noise_dba | 30 | model_1_nl | depth 6, lr 0.1, 382 trees | **+0.764** [+0.724, +0.794] | 1.91 | 2.93 |
+| noise_dba | 30 | model_3_nl | depth 6, lr 0.05, 399 trees | **+0.778** [+0.740, +0.808] | 1.80 | 2.78 |
+| noise_dba | 60 | model_1 (Day 6) | depth 6, lr 0.05, 398 trees | **+0.759** [+0.737, +0.781] | 1.96 | 2.91 |
+| noise_dba | 60 | model_3 (Day 6) | depth 6, lr 0.05, 286 trees | **+0.787** [+0.766, +0.805] | 1.73 | 2.56 |
+| noise_dba | 60 | model_1_nl | depth 6, lr 0.05, 399 trees | **+0.766** [+0.741, +0.790] | 1.90 | 2.85 |
+| noise_dba | 60 | model_3_nl | depth 6, lr 0.1, 392 trees | **+0.780** [+0.758, +0.801] | 1.79 | 2.64 |
+| pm25_ugm3 | 30 | model_1 (Day 6) | depth 6, lr 0.05, 327 trees | **+0.383** [+0.335, +0.427] | 38.06 | 64.30 |
+| pm25_ugm3 | 30 | model_3 (Day 6) | depth 6, lr 0.05, 200 trees | **+0.369** [+0.315, +0.416] | 38.98 | 64.46 |
+| pm25_ugm3 | 30 | model_1_nl | depth 3, lr 0.1, 318 trees | **+0.375** [+0.324, +0.416] | 38.57 | 63.20 |
+| pm25_ugm3 | 30 | model_3_nl | depth 3, lr 0.05, 399 trees | **+0.385** [+0.338, +0.426] | 37.97 | 62.46 |
+| pm25_ugm3 | 60 | model_1 (Day 6) | depth 6, lr 0.05, 157 trees | **+0.430** [+0.387, +0.472] | 37.56 | 62.43 |
+| pm25_ugm3 | 60 | model_3 (Day 6) | depth 6, lr 0.05, 218 trees | **+0.439** [+0.395, +0.479] | 36.95 | 62.33 |
+| pm25_ugm3 | 60 | model_1_nl | depth 6, lr 0.05, 242 trees | **+0.418** [+0.367, +0.460] | 38.33 | 64.19 |
+| pm25_ugm3 | 60 | model_3_nl | depth 6, lr 0.05, 217 trees | **+0.431** [+0.386, +0.473] | 37.50 | 63.03 |
+
+### Model 3-NL − Model 1-NL (95% block-bootstrap CI), beside the Day 6 gain
+
+| Target | h | Gain without target lags | Gain with target lags (Model 3 − Model 1) |
+|---|---|---|---|
+| noise_dba | 30 | **+0.014 [+0.009, +0.021]** — better | +0.017 [+0.011, +0.025] — better |
+| noise_dba | 60 | **+0.014 [+0.005, +0.022]** — better | +0.028 [+0.020, +0.037] — better |
+| pm25_ugm3 | 30 | **+0.010 [-0.003, +0.022]** — not distinguishable | -0.015 [-0.041, +0.011] — not distinguishable |
+| pm25_ugm3 | 60 | **+0.013 [-0.001, +0.027]** — not distinguishable | +0.009 [-0.008, +0.026] — not distinguishable |
+
+### Supplementary: also without the timetable
+
+To measure how much of the machine signal is redundant with the schedule itself, the same comparison is repeated with the schedule columns (`minute_sin`, `minute_cos`, `shift_code`, `is_break`) also removed: Model 1-NS = temperature, RH, CO2 and their means, plus `zone_code`; Model 3-NS adds the same machine and worker columns. Same tuning and bootstrap.
+
+| Target | h | Skill 1-NS | Skill 3-NS | **Gain without lags or timetable** [95% CI] |
+|---|---|---|---|---|
+| noise_dba | 30 | +0.255 | +0.263 | **+0.008 [-0.007, +0.019]** — not distinguishable |
+| noise_dba | 60 | +0.279 | +0.281 | **+0.002 [-0.008, +0.013]** — not distinguishable |
+| pm25_ugm3 | 30 | +0.301 | +0.306 | **+0.005 [-0.003, +0.012]** — not distinguishable |
+| pm25_ugm3 | 60 | +0.355 | +0.356 | **+0.001 [-0.006, +0.009]** — not distinguishable |
+
+### Per zone (gain without target lags)
+
+| Target | h | Zone | n | Skill 1-NL | Skill 3-NL | 3-NL − 1-NL [CI] |
+|---|---|---|---|---|---|---|
+| noise_dba | 30 | Z1 | 1,400 | +0.801 | +0.806 | +0.005 [-0.004, +0.016] ~ |
+| noise_dba | 30 | Z2 | 1,346 | +0.769 | +0.786 | +0.017 [+0.005, +0.040] ✓ |
+| noise_dba | 30 | Z3 | 1,410 | +0.780 | +0.799 | +0.019 [+0.007, +0.036] ✓ |
+| noise_dba | 30 | Z4 | 1,388 | +0.799 | +0.805 | +0.006 [-0.004, +0.020] ~ |
+| noise_dba | 30 | Z5 | 1,386 | +0.794 | +0.814 | +0.020 [+0.010, +0.034] ✓ |
+| noise_dba | 30 | Z6 | 1,404 | +0.782 | +0.802 | +0.021 [-0.000, +0.050] ~ |
+| noise_dba | 30 | Z7 | 1,386 | +0.227 | +0.239 | +0.012 [-0.007, +0.043] ~ |
+| noise_dba | 60 | Z1 | 1,370 | +0.797 | +0.821 | +0.024 [+0.012, +0.041] ✓ |
+| noise_dba | 60 | Z2 | 1,316 | +0.789 | +0.803 | +0.014 [+0.002, +0.030] ✓ |
+| noise_dba | 60 | Z3 | 1,380 | +0.786 | +0.788 | +0.002 [-0.011, +0.015] ~ |
+| noise_dba | 60 | Z4 | 1,358 | +0.803 | +0.809 | +0.006 [-0.010, +0.019] ~ |
+| noise_dba | 60 | Z5 | 1,356 | +0.804 | +0.804 | -0.000 [-0.023, +0.016] ~ |
+| noise_dba | 60 | Z6 | 1,374 | +0.780 | +0.802 | +0.022 [-0.005, +0.052] ~ |
+| noise_dba | 60 | Z7 | 1,356 | +0.164 | +0.246 | +0.081 [-0.021, +0.205] ~ |
+| pm25_ugm3 | 30 | Z1 | 1,410 | +0.378 | +0.371 | -0.007 [-0.033, +0.019] ~ |
+| pm25_ugm3 | 30 | Z2 | 1,378 | +0.400 | +0.410 | +0.011 [-0.006, +0.034] ~ |
+| pm25_ugm3 | 30 | Z3 | 1,406 | +0.399 | +0.405 | +0.007 [-0.024, +0.034] ~ |
+| pm25_ugm3 | 30 | Z4 | 1,400 | +0.265 | +0.272 | +0.007 [-0.028, +0.043] ~ |
+| pm25_ugm3 | 30 | Z5 | 1,374 | +0.476 | +0.492 | +0.015 [-0.021, +0.059] ~ |
+| pm25_ugm3 | 30 | Z6 | 1,394 | +0.421 | +0.474 | +0.054 [+0.001, +0.114] ✓ |
+| pm25_ugm3 | 30 | Z7 | 1,386 | -0.482 | -0.423 | +0.059 [-0.109, +0.251] ~ |
+| pm25_ugm3 | 60 | Z1 | 1,380 | +0.394 | +0.400 | +0.005 [-0.031, +0.038] ~ |
+| pm25_ugm3 | 60 | Z2 | 1,348 | +0.453 | +0.453 | +0.000 [-0.022, +0.021] ~ |
+| pm25_ugm3 | 60 | Z3 | 1,376 | +0.415 | +0.436 | +0.021 [-0.005, +0.049] ~ |
+| pm25_ugm3 | 60 | Z4 | 1,370 | +0.355 | +0.363 | +0.008 [-0.018, +0.038] ~ |
+| pm25_ugm3 | 60 | Z5 | 1,344 | +0.482 | +0.490 | +0.008 [-0.010, +0.028] ~ |
+| pm25_ugm3 | 60 | Z6 | 1,364 | +0.387 | +0.470 | +0.083 [+0.012, +0.144] ✓ |
+| pm25_ugm3 | 60 | Z7 | 1,356 | +0.192 | +0.305 | +0.113 [-0.002, +0.242] ~ |
+
+Figure: `docs/figures/ablation_redundancy.png` (skill of Model 1, Model 3, Model 1-NL and Model 3-NL with 95% bootstrap bars).
+
+## Conclusion: the answer to Objective 6 (revised on Day 7)
+
+**With dense target history available, machine and worker features add little: +0.017
+to +0.028 noise skill. The Day 7 redundancy analysis tested whether that was because
+their information is redundant with the target's own autocorrelation, and the answer
+is: only partly. With every target-derived column removed, the same features still
+add only +0.014 noise skill at both horizons (95% CIs exclude 0), and nothing
+distinguishable for dust. With the timetable also removed, they add nothing
+distinguishable at all (+0.001 to +0.008).**
+
+**The information is redundant with the timetable.** In this simulator, machines run
+exactly when the shift schedule says. A context-only model (temperature, RH, CO2, time
+of day, shift, break and zone, with **no noise input at all**) reaches noise skill
+**+0.76 / +0.77**. That is as high as the Day 6 model with dense noise history
+(+0.74 / +0.76; the two were not compared with a paired interval). Machine state at t
+describes what is happening *now*. Over a 30–60-minute horizon, what changes zone noise
+is the next break or shift change, and the timetable already knows that.
+
+**So the objective's question has a negative answer on this dataset:** worker and
+machine data do not improve 30–60-minute hazard forecasting beyond what the
+environmental context and the timetable already provide. The improvement that exists
+is statistically detectable but small: about 0.1 dB of MAE.
+
+**The practical implication is sensor-failure resilience, carried mainly by the
+timetable.** When a noise or PM sensor clogs, drifts or fails (a documented failure
+mode for optical sensors in lint-heavy air), a model with no hazard-sensor input
+continues to forecast zone hazard levels: noise skill +0.76 / +0.77 and dust
++0.38 / +0.42, close to the full models. Machine state adds a small, significant
++0.014 on top for noise. In this simulator, the timetable, not machine state, carries
+the fallback signal. On a real mill, machines also stop for unscheduled reasons, and
+then machine state would carry information the timetable cannot. That is a hypothesis
+for the hardware phase, not a result here. The direct test, estimating *current* zone
+noise from machine state alone (a nowcast), was not run.
+
+### What the Day 6 numbers show
 
 - **Noise forecasting: Model 3 > Model 1, significant at both horizons.** Skill rises
   +0.017 at 30 min (95% CI +0.011 to +0.025) and +0.028 at 60 min (+0.020 to +0.037).
