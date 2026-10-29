@@ -20,7 +20,7 @@ import logging
 import queue
 import sys
 import time
-from collections import Counter, defaultdict, deque
+from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,7 +125,10 @@ class Ingestor:
         self._last_commit = clock()
         self._pending: list[Message] = []
         n = config.get_validation_config()["stuck_value_count"]
-        self._history: dict[str, dict[str, deque[float]]] = defaultdict(lambda: defaultdict(lambda: deque(maxlen=n)))
+        # Bounded both ways: at most max_history_devices device IDs, each field a deque of n.
+        self._history_len = n
+        self._max_history_devices = int(config.get_ingest_config()["max_history_devices"])
+        self._history: dict[str, dict[str, deque[float]]] = {}
         self._card_to_worker = {w["card_id"]: w["worker_id"] for w in config.get_workers()}
         self._excerpt = config.get_ingest_config()["payload_excerpt_chars"]
         self.counts: Counter[str] = Counter()      # received, stored, duplicate, rejected, ...
@@ -164,7 +167,7 @@ class Ingestor:
 
         device_id = payload.get("device_id") if isinstance(payload, dict) else None
         device_id = device_id if isinstance(device_id, str) else None
-        history = self._history[device_id] if device_id else {}
+        history = self._history.get(device_id, {}) if device_id else {}
         reference = self.time_reference.reference(payload, msg.received_at)
         verdict = validate(msg.topic, payload, reference, history)
         if not verdict.accepted:
@@ -177,13 +180,29 @@ class Ingestor:
         self.time_reference.advance(verdict.kind, payload, msg.retained)
         if not self._store(msg.topic, payload, received_ts, verdict):
             return "duplicate"
-        for name, value in history_values(verdict.kind, payload).items():
-            history[name].append(value)
+        values = history_values(verdict.kind, payload)
+        stored = self._device_history(device_id) if device_id and values else None
+        if stored is not None:
+            for name, value in values.items():
+                stored.setdefault(name, deque(maxlen=self._history_len)).append(value)
         self.accepted_by_kind[verdict.kind] += 1
         if verdict.flags:
             self.counts["flagged"] += 1
             self.flag_counts.update(verdict.flags)
         return "stored"
+
+    def _device_history(self, device_id: str) -> dict[str, deque[float]] | None:
+        """The history slot for an accepted device, created on first use; None (logged) once
+        max_history_devices IDs are tracked, so a stream of new IDs cannot grow memory."""
+        if device_id in self._history:
+            return self._history[device_id]
+        if len(self._history) >= self._max_history_devices:
+            self.counts["history_untracked"] += 1
+            log.error("history cap of %d devices reached; no stuck/spike history for %s",
+                      self._max_history_devices, device_id)
+            return None
+        self._history[device_id] = {}
+        return self._history[device_id]
 
     def _reject(self, msg: Message, received_ts: str, reason: Reason, detail: str,
                 device_id: str | None) -> str:
@@ -254,7 +273,9 @@ class Subscriber:
         self._stats_interval_s = stats_interval_s
         self._poll_s = poll_s
         self._clock = clock
-        self._queue: queue.Queue[Message] = queue.Queue()
+        # Bounded: a full queue blocks the network thread, so the broker holds the
+        # backlog (back-pressure). Nothing is dropped, unlike a deque(maxlen=...).
+        self._queue: queue.Queue[Message] = queue.Queue(maxsize=int(config.get_ingest_config()["max_queued_messages"]))
         self._closing = False
         self._stop = False
         self._last_stats = clock()
@@ -385,6 +406,35 @@ def make_client() -> mqtt.Client:
     )
 
 
+def discard_session(host: str, port: int, keepalive_s: int, client_factory: Callable[..., Any] = mqtt.Client) -> None:
+    """Drop the broker's stored session (and any queued messages) for the ingest client ID.
+
+    The persistent session (`clean_session: false`) is what lets ingest survive its own
+    restarts. Before a NEW dataset is ingested, though, messages queued from an earlier,
+    interrupted run must not arrive first: in `stream` mode they would move the
+    watermark (Day 8A found 4 such messages flagging every later record late_upload).
+    Connecting once with clean_session=True under the same ID discards that session.
+    """
+    mqtt_cfg, ingest_cfg = config.get_mqtt_config(), config.get_ingest_config()
+    client = client_factory(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"{mqtt_cfg['client_id_prefix']}-{ingest_cfg['client_id_suffix']}",
+        clean_session=True,
+        protocol=mqtt.MQTTv311,
+    )
+    client.connect(host, port, keepalive_s)
+    client.loop_start()
+    deadline = time.monotonic() + keepalive_s
+    while not client.is_connected():
+        if time.monotonic() > deadline:
+            client.loop_stop()
+            raise ConnectionError(f"could not connect to {host}:{port} to discard the stored session")
+        time.sleep(0.05)
+    client.disconnect()
+    client.loop_stop()
+    log.warning("discarded the broker's stored session for this client: queued messages from earlier runs dropped")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Command-line options. Defaults come from config.yaml."""
     mqtt_cfg, ingest_cfg = config.get_mqtt_config(), config.get_ingest_config()
@@ -397,6 +447,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="seconds between summary log lines")
     p.add_argument("--time-reference", choices=["wall", "stream"], default=ingest_cfg["time_reference"],
                    help="'now' for future/late checks: wall clock, or newest accepted ts (replays)")
+    p.add_argument("--discard-session", action="store_true",
+                   help="drop messages queued for this client by an earlier run before subscribing "
+                        "(use when starting a NEW dataset, never to resume one)")
     p.add_argument("--idle-exit-s", type=float, default=None,
                    help="exit cleanly after this many seconds without messages (scripted runs)")
     return p.parse_args(argv)
@@ -408,7 +461,9 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=getattr(logging, args.log_level), stream=sys.stderr,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     mqtt_cfg, ingest_cfg = config.get_mqtt_config(), config.get_ingest_config()
-    repo = Repo(args.db)
+    if args.discard_session:
+        discard_session(args.broker, args.port, int(mqtt_cfg["keepalive_s"]))
+    repo = Repo(args.db, wal_checkpoint_every=int(ingest_cfg["wal_checkpoint_every_commits"]))
     repo.init_schema()     # idempotent: creates missing tables, keeps data
     ingestor = Ingestor(repo, TimeReference(args.time_reference),
                         int(ingest_cfg["batch_size"]), float(ingest_cfg["batch_interval_s"]),

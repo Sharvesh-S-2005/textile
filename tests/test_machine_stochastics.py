@@ -75,7 +75,8 @@ def test_the_correlated_dependency_fires() -> None:
 
 
 def test_downstream_is_down_while_starved() -> None:
-    plant = Plant(config.get_machines(), CFG, np.random.default_rng(0))
+    plant = Plant(config.get_machines(), CFG, np.random.default_rng(0),
+                  config.get_simulation_config()["memory_bounds"]["stop_log_max_per_machine"])
     dep = CFG["dependencies"][0]
     t0 = START + timedelta(hours=3)
     plant.on_stop(dep["upstream"], t0, t0 + timedelta(minutes=20))

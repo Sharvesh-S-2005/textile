@@ -17,10 +17,13 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+
+log = logging.getLogger("db.repo")
 
 SCHEMA_PATH: Path = Path(__file__).resolve().parent / "schema.sql"
 BUSY_TIMEOUT_MS = 5000
@@ -142,8 +145,12 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
 class Repo:
     """A connection to the project database and every query the project runs."""
 
-    def __init__(self, db_path: Path | str, read_only: bool = False) -> None:
+    def __init__(self, db_path: Path | str, read_only: bool = False,
+                 wal_checkpoint_every: int | None = None) -> None:
         """Open (creating if needed) the database file and apply connection settings.
+
+        wal_checkpoint_every: run `PRAGMA wal_checkpoint(TRUNCATE)` after every N commits
+        and log the WAL size before and after (None: rely on SQLite's auto-checkpoint).
 
         read_only=True opens an existing file with a `mode=ro` URI: every write is
         refused by SQLite itself (used by the dashboard, so it cannot damage a run).
@@ -152,6 +159,10 @@ class Repo:
         """
         self.db_path = Path(db_path)
         self.read_only = read_only
+        if wal_checkpoint_every is not None and wal_checkpoint_every < 1:
+            raise ValueError(f"wal_checkpoint_every must be >= 1, got {wal_checkpoint_every}")
+        self._checkpoint_every = wal_checkpoint_every
+        self._commits = 0
         if read_only:
             if not self.db_path.is_file():
                 raise FileNotFoundError(f"database not found: {self.db_path}")
@@ -242,8 +253,39 @@ class Repo:
         return bool(self._conn.execute("PRAGMA foreign_keys").fetchone()[0])
 
     def commit(self) -> None:
-        """Commit the current batch."""
+        """Commit the current batch, checkpointing the WAL every N commits if configured."""
         self._conn.commit()
+        self._commits += 1
+        if self._checkpoint_every is not None and self._commits % self._checkpoint_every == 0:
+            self.checkpoint_wal()
+
+    def wal_path(self) -> Path:
+        """The WAL file that sits next to the database."""
+        return self.db_path.with_name(self.db_path.name + "-wal")
+
+    def wal_size_bytes(self) -> int:
+        """Current size of the WAL file (0 if absent)."""
+        wal = self.wal_path()
+        return wal.stat().st_size if wal.exists() else 0
+
+    def checkpoint_wal(self) -> dict[str, int]:
+        """Copy the WAL into the database and truncate it to zero bytes; logs the sizes.
+
+        Returns busy (1 if a reader blocked a full checkpoint), the WAL frames and the
+        frames checkpointed, plus the file size before and after. A blocked checkpoint is
+        logged as a warning, not raised: the next one retries.
+        """
+        before = self.wal_size_bytes()
+        busy, frames, done = self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        after = self.wal_size_bytes()
+        result = {"busy": int(busy), "wal_frames": int(frames), "checkpointed": int(done),
+                  "wal_bytes_before": before, "wal_bytes_after": after}
+        if busy:
+            log.warning("WAL checkpoint blocked by a reader after commit %d: WAL %.2f MB", self._commits, before / 2**20)
+        else:
+            log.info("WAL checkpoint after commit %d: %.2f MB -> %.2f MB", self._commits,
+                     before / 2**20, after / 2**20)
+        return result
 
     def rollback(self) -> None:
         """Discard the current uncommitted batch."""

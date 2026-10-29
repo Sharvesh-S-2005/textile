@@ -19,6 +19,16 @@ simulation:
   speed_factor: 1.0
   random_seed: 42
   firmware_tag: "sim-0.1.0"
+  # Day 8A: caps on everything the publisher keeps while running, so a long run's
+  # memory cannot grow with its length. None of these changes a random draw.
+  memory_bounds:
+    ground_truth_flush_lines: 1000     # flush the ground-truth JSONL every N lines
+    outage_buffer_max_records: 50000   # per device "microSD" buffer; oldest overwritten (logged)
+    stop_log_max_per_machine: 5000     # StopRecord history (verify_stochastics needs about 1,400 in 28 days)
+    # tests/test_memory_bounds.py: dry-run this window in-process; private memory at the
+    # end must be within margin_mb of the value 10% of the way through.
+    regression_window_h: 24
+    regression_margin_mb: 20
 
   # Parameters for simulator/profiles.py (zone hazard model).
   zone_dynamics:
@@ -497,6 +507,10 @@ ingest:
   reconnect_max_s: 30
   stats_interval_s: 10           # default for --stats-interval
   payload_excerpt_chars: 200     # how much of a failing payload to log
+  # Day 8A memory bounds.
+  wal_checkpoint_every_commits: 200   # PRAGMA wal_checkpoint(TRUNCATE) every N commits; WAL size logged
+  max_queued_messages: 10000     # network-thread -> main-thread queue; a full queue blocks (back-pressure, never drops)
+  max_history_devices: 64        # stuck/spike history is kept for at most this many device IDs
   # wall: "now" is the wall clock (real hardware). stream: "now" is the newest
   # accepted telemetry/event ts (replays and accelerated simulation).
   time_reference: wall

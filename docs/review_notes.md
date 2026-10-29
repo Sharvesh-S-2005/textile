@@ -748,3 +748,41 @@ the 4 foreign rows were stored. The deterministic dataset has zero `late_upload`
 flags, so restarting without a purge would have made the two datasets differ in
 something other than the simulator. The restart therefore begins by discarding that
 session (Task 3).
+
+### Task 2: every collection bounded (hardening; the probe found no leak)
+
+None of these fixed a leak, because there was none. They make sure a longer run cannot
+grow, and `tests/test_memory_bounds.py` turns that into a regression test. The new caps
+are in `config.yaml` (`simulation.memory_bounds`, `ingest`).
+
+- **2a WAL checkpoint.** `Repo(..., wal_checkpoint_every=N)` runs
+  `PRAGMA wal_checkpoint(TRUNCATE)` every N commits (N = 200,
+  `ingest.wal_checkpoint_every_commits`) and logs the WAL size before and after. A
+  checkpoint blocked by a reader is logged as a warning and retried at the next one.
+- **2b Ground truth.** It was already written line by line through one open file. It
+  is now also flushed every 1000 lines, so a killed run keeps its ground truth up to
+  that point.
+- **2c Bounds:**
+  - The subscriber's queue is `queue.Queue(maxsize=10000)`. A full queue blocks the
+    network thread, so the backlog stays at the broker and nothing is lost. A
+    `deque(maxlen=...)` was deliberately *not* used for ingest data: it drops the
+    oldest message silently, which would break the zero-loss guarantee and the
+    fail-loudly rule.
+  - Stuck/spike history is kept for at most 64 device IDs, created only for accepted
+    records. Each field's history was already a `deque(maxlen=stuck_value_count)`. An
+    untracked device is counted and logged.
+  - The publisher's outage buffer is a `deque(maxlen=50000)`, a finite microSD
+    buffer. An overwrite is counted and logged as an error.
+  - Each machine's stop log is a `deque(maxlen=5000)`. `verify_stochastics` raises if
+    a log saturates.
+  - Shift-start plans older than one day are pruned.
+- **2d Counters.** Summary lines were already built from `Counter`s. No list was being
+  kept only for a summary.
+- **No draw changed.** Before and after the changes, the stochastic 48 h dry run, its
+  ground-truth file and the deterministic 6 h dry run are byte-identical (same
+  SHA-256).
+- **Regression test:** an in-process 24 h stochastic dry run (150k messages). Memory at
+  the end must be within 20 MB of the value 10% of the way through. Measured: resident
+  59.0 → 59.0 MB, private 523.6 → 523.6 MB. A first version of the test kept every Z3
+  payload in its own sink and showed +9 MB, which was the test's own growth, not the
+  publisher's.

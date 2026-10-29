@@ -167,6 +167,9 @@ def verify(start: datetime, duration: timedelta, seed: int, step_s: int,
     """Build a stochastic Simulation for the window and measure it."""
     sim = Simulation(start, duration, seed, [], whole_sessions_only=whole_sessions_only, machine_stochastics=True)
     trace = run_machines(sim, step_s)
+    full = [m for m, st in sim.plant.machines.items() if len(st.stops) == st.stops.maxlen]
+    if full:    # a saturated (bounded) stop log would silently drop the earliest stops
+        raise RuntimeError(f"stop log full for {full}; raise simulation.memory_bounds.stop_log_max_per_machine")
     return {"start": start.isoformat(), "end": (start + duration).isoformat(), "seed": seed, "step_s": step_s,
             "availability": availability(trace, sim), "onset_alignment": onset_alignment(trace, sim),
             "dependency_fired": sim.plant.dependency_fired,

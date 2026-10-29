@@ -25,6 +25,7 @@ simulator's random sequences exactly as they were.
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -67,7 +68,7 @@ class MachineStochastics:
     load_cfg: dict[str, Any]
     rng: np.random.Generator
     plant: Plant | None = None
-    stops: list[StopRecord] = field(default_factory=list)
+    stops: deque[StopRecord] = field(default_factory=deque)   # Plant passes a bounded deque
     _forced: list[tuple[datetime, datetime]] = field(default_factory=list)
     _stop_until: datetime | None = None
     _run_since_stop_min: float = 0.0
@@ -89,6 +90,11 @@ class MachineStochastics:
         Drawn once per shift instance, the first time the shift is seen.
         """
         if shift_start not in self._shift_plan:
+            # Readings arrive in time order, so plans older than a day are never asked
+            # for again; dropping them keeps the dict bounded without changing any draw.
+            horizon = shift_start - timedelta(days=1)
+            for old in [k for k in self._shift_plan if k < horizon]:
+                del self._shift_plan[old]
             s = self.shift_cfg
             if self.rng.random() < s["skip_probability"]:
                 delay: float | None = None
@@ -172,8 +178,11 @@ class MachineStochastics:
 class Plant:
     """All machines' stochastic state plus the stop dependencies between them."""
 
-    def __init__(self, machines_cfg: list[dict[str, Any]], cfg: dict[str, Any], rng: np.random.Generator) -> None:
-        """Args: config `machines`, `simulation.machine_stochastics`, and a generator owned by the plant."""
+    def __init__(self, machines_cfg: list[dict[str, Any]], cfg: dict[str, Any], rng: np.random.Generator,
+                 stop_log_max: int) -> None:
+        """Args: config `machines`, `simulation.machine_stochastics`, a generator owned by the
+        plant, and the cap on each machine's stop log (`simulation.memory_bounds`)."""
+        self.stop_log_max = stop_log_max
         self.cfg = cfg
         self.machines: dict[str, MachineStochastics] = {}
         for m, child in zip(machines_cfg, rng.spawn(len(machines_cfg))):
@@ -182,7 +191,8 @@ class Plant:
             params = StopParams(float(t["mean_run_min_between_stops"]), float(t["stop_duration_median_min"]),
                                 float(t["stop_duration_sigma"]), tuple(t["target_availability"]))
             self.machines[m["machine_id"]] = MachineStochastics(m["machine_id"], params, cfg["shift_start"],
-                                                                cfg["load"], child, plant=self)
+                                                                cfg["load"], child, plant=self,
+                                                                stops=deque(maxlen=stop_log_max))
         self.dependencies = list(cfg.get("dependencies", []))
         self.dependency_fired = 0
         for d in self.dependencies:

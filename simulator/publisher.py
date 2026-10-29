@@ -20,7 +20,7 @@ import math
 import sys
 import time
 import uuid
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -188,7 +188,8 @@ class Simulation:
         # Spawned after every other stream, so the deterministic sequences are unchanged.
         self.plant: Plant | None = None
         if machine_stochastics:
-            self.plant = Plant(machines_cfg, self.sim["machine_stochastics"], root.spawn(1)[0])
+            self.plant = Plant(machines_cfg, self.sim["machine_stochastics"], root.spawn(1)[0],
+                               int(self.sim["memory_bounds"]["stop_log_max_per_machine"]))
             for m in self.machines:
                 m.attach_stochastics(self.plant.for_machine(m.machine_id))
 
@@ -297,7 +298,13 @@ class Simulation:
         tick_s = math.gcd(sim["env_interval_s"], sim["ble_interval_s"], sim["machine_interval_s"])
         n_ticks = int((self.end - self.start).total_seconds() // tick_s)
         counts: Counter[str] = Counter()
-        buffers: dict[str, list[tuple[str, dict]]] = {o.device_id: [] for o in self.outages}
+        bounds = sim["memory_bounds"]
+        # A device's microSD buffer is finite: once full, the oldest record is overwritten
+        # (counted as buffer_overwritten and logged), so memory cannot grow with the outage.
+        buffers: dict[str, deque[tuple[str, dict]]] = {
+            o.device_id: deque(maxlen=int(bounds["outage_buffer_max_records"])) for o in self.outages}
+        flush_every = int(bounds["ground_truth_flush_lines"])
+        truth_lines = 0
         rfid = [e for e in self.workers.rfid_events if self.start <= e.ts < self.end]
         ppe = [e for e in self.workers.ppe_events if self.start <= e.ts < self.end]
         wall_start = time.monotonic()
@@ -307,7 +314,11 @@ class Simulation:
 
         def send(device_id: str, topic: str, payload: dict, kind: str, retain: bool = False) -> None:
             if any(o.covers(device_id, ts) for o in self.outages):
-                buffers[device_id].append((topic, payload))
+                buffer = buffers[device_id]
+                if len(buffer) == buffer.maxlen:
+                    counts["buffer_overwritten"] += 1
+                    log.error("%s buffer full (%d records); oldest record overwritten", device_id, buffer.maxlen)
+                buffer.append((topic, payload))
                 counts["buffered"] += 1
                 return
             sink.publish(device_id, topic, payload, retain)
@@ -358,6 +369,9 @@ class Simulation:
                     if ground_truth is not None:
                         for row in self.ground_truth_rows(ts):
                             ground_truth.write(json.dumps(row) + "\n")
+                            truth_lines += 1
+                            if truth_lines % flush_every == 0:
+                                ground_truth.flush()
 
                 if ts >= next_summary:
                     self._log_summary(ts, counts, wall_start)
@@ -378,7 +392,7 @@ class Simulation:
             sink.close()
 
     def _replay(self, sink: Sink, device_id: str, ts: datetime,
-                buffer: list[tuple[str, dict]], counts: Counter[str]) -> None:
+                buffer: deque[tuple[str, dict]], counts: Counter[str]) -> None:
         """Reconnect after an outage: announce the backlog, then replay it with original ts."""
         topic = self.status_topic[device_id]
         log.info("%s reconnected at %s; replaying %d buffered records", device_id, iso_z(ts), len(buffer))

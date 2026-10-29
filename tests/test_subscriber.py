@@ -346,3 +346,35 @@ def test_duplicates_advance_the_watermark_so_replays_still_reject_future_records
         assert outcomes[1] in ("rejected", "rejected_duplicate")
     assert repo.table_counts()["zone_env"] == 1
     repo.close()
+
+
+def test_discard_session_connects_once_with_a_clean_session() -> None:
+    """Day 8A: --discard-session drops what an interrupted run left queued at the broker."""
+    from ingest.subscriber import discard_session
+
+    made: list[dict] = []
+
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            made.append(kwargs)
+            self.calls: list[str] = []
+            self._connected = False
+
+        def connect(self, host: str, port: int, keepalive: int) -> None:
+            self.calls.append("connect")
+
+        def loop_start(self) -> None:
+            self._connected = True
+
+        def is_connected(self) -> bool:
+            return self._connected
+
+        def disconnect(self) -> None:
+            self.calls.append("disconnect")
+
+        def loop_stop(self) -> None:
+            self.calls.append("loop_stop")
+
+    discard_session("localhost", 1883, 5, client_factory=Client)
+    assert len(made) == 1 and made[0]["clean_session"] is True
+    assert made[0]["client_id"].endswith("-ingest")
