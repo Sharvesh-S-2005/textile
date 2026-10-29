@@ -638,3 +638,60 @@ BLE calibration walks), questionnaire labels, TimescaleDB migration.
   coupling the simulator builds in. The caveat is stated in each place.
 - One test day: no between-day variance estimate. The risk classifier is still
   deferred pending questionnaire labels.
+
+---
+
+## Day 7 — Redundancy analysis, zone-group reporting, final state (2026-10-29)
+
+### What was built
+
+| Commit | Piece |
+|---|---|
+| 740560b | **Ablation redundancy analysis** (`ml/ablation.py --nl-only`). Model 1-NL (context: temperature/RH/CO2 and their means, time of day, shift, break, zone) against Model 3-NL (+ machines running, current, vibration, workers present), with no column derived from any hazard series (enforced by a test). A supplementary pair (1-NS / 3-NS) also drops the timetable. Merged into the saved Day 6 metrics; Day 6 numbers were not recomputed. Figure `ablation_redundancy.png`. |
+| 8e0c2e4 | **Classification by zone group** (borderline Z2/Z3/Z6, always-loud Z1/Z4/Z5, excluded Z7; in `config.yaml`), leading with Z2, in `results_classification.md`, on the Models page and in the numbers sheet. **EWMA-over-isolation-forest** conclusion promoted to a paragraph in `results_ml.md` and on the Models page. |
+| (final) | `docs/review_qa.md` entries 12 ("ablation gains are tiny") and 13 ("why worse in carding?"); `DAY_7.md` committed. |
+
+### Findings that changed the headline
+
+- **Objective 6 has a negative answer on this dataset.** Without target lags, machine
+  and worker data still add only +0.014 noise skill (CIs exclude 0; about 0.1 dB of
+  MAE). Without the timetable as well, they add nothing distinguishable. The Day 7
+  brief expected a *large* no-lag gain; it did not appear. The redundancy is with
+  the **timetable**, not mainly with target autocorrelation. A model with no noise
+  input reaches skill +0.76 / +0.77, which supports a **sensor-failure resilience**
+  claim carried mainly by the timetable.
+- **Exceedance warnings are weak exactly where they matter.** In Z2, `crossing` PR-AUC
+  is 0.22 against a base rate of 0.18, with false alarms on 44–53% of quiet minutes at
+  the pooled threshold. In the borderline group it is 0.18 against 0.08. The pooled
+  0.83 comes from trivial restarts in the loud zones (66% of positives) and the
+  office's certain negatives (24% of rows).
+
+### Deviations from the brief, stated
+
+- `zone_code` is kept in both no-lag sets (the brief's list omits it). Without it, the
+  machine counts would act as a zone label and inflate the gain.
+- Z1 is placed in the always-loud group (the brief's table omits it): its `crossing`
+  label is 82–85% positive and the model predicts "yes" there almost always.
+- The supplementary no-timetable pair goes beyond the brief. It was added to explain
+  the small no-lag gain with a measurement rather than an assertion.
+
+### Offline rehearsal (Task 3a): NOT YET PERFORMED
+
+This needs a person at the machine with the network physically off; the development
+session cannot do it. A **static check** was done instead: no `http(s)://` URLs in
+`dashboard/`, no map tiles or font CDNs, plots rendered by Streamlit's bundled
+Plotly, and `gatherUsageStats = false` in `.streamlit/config.toml`. This lowers the
+risk; it does not replace the rehearsal. **Record the outcome here after running the
+checklist in `DAY_7.md` Task 3a** (Wi-Fi off → `streamlit run dashboard/app.py` → every
+page and sidebar option → W105 drilldown, Live Zones chart, every Models-page figure).
+
+### Open items
+
+- `DAY_7.md` asks that review Q7 and Q9 point at `docs/feasibility_table.md`. That
+  file does not exist: the feasibility table is in the project report. Q7 in this
+  repository is about localisation settings, not feasibility. Q9 still points to the
+  report. To be resolved by adding the table from the report.
+- Zone-specific classification thresholds (chosen on validation) were not tried, to
+  avoid any further tuning after the test day had been seen.
+- A nowcast test (current zone noise from machine state alone) is the direct test of
+  the machine-state fallback, and was not run.

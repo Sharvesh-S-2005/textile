@@ -68,7 +68,31 @@ elutriated fraction measured gravimetrically; low-cost optical PM2.5/PM10 is ind
 only. We use it for trends, zone comparison and as an ML feature, after humidity
 correction.
 
-**12. What is left?**
+**12. "Your ablation gains are tiny."**
+Correct, and we investigated why. With the noise sensor's own history in the model,
+machine and worker data add +0.017 / +0.028 skill. We then removed every column derived
+from any hazard sensor and repeated the comparison: the gain is still only +0.014
+(significant, about 0.1 dB), and with the timetable also removed it disappears. So the
+information is redundant with the **timetable**: in the simulator, machines run exactly
+when the schedule says. A model with **no noise input at all** (temperature, RH, CO2,
+time of day, shift, break, zone) forecasts zone noise with skill +0.76 / +0.77, as well
+as the full model. That is the practical result: **sensor-failure resilience.** When a
+noise or PM sensor clogs, drifts or fails, as optical sensors do in lint-heavy air,
+zone hazard forecasting continues without it. On a real mill with unscheduled stops,
+machine state should matter more; that is a hypothesis for the hardware phase. Show
+`docs/figures/ablation_redundancy.png`.
+
+**13. "Why does classification do worse in carding?"**
+Because Z2 hovers at the 90 dBA threshold, its crossings are driven by small
+fluctuations rather than by the schedule, and fluctuations are not predictable from
+these features. PR-AUC there is 0.22 against a base rate of 0.18: it barely beats
+chance, and we lead with that. It is the hard case and also the one that matters most.
+In the always-loud zones the same task is trivial (machines restart after every break)
+and a warning adds nothing, which is why the pooled PR-AUC of 0.83 is not the result we
+quote. Zone-specific thresholds and features that see fluctuations coming are the next
+step.
+
+**14. What is left?**
 Hardware deployment and firmware testing on real boards, questionnaire labels for a
 risk model, calibration against a handheld sound-level meter and a reference dust
 sampler, and the TimescaleDB migration.
